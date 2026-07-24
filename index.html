@@ -799,6 +799,20 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .dbRow small{color:var(--muted)}
   .dbRow button{flex:none; min-height:36px; padding:0 12px; font-size:12.5px; font-weight:700; background:var(--surface); border:1px solid var(--border); color:var(--fg); border-radius:9px}
 
+  /* Benutzer/Projekt/Punkte-Dialoge */
+  #projZeile{font-size:10.5px; color:var(--muted); line-height:1.25; margin-top:2px}
+  #menuUser{padding:8px 14px 7px; font-size:12px; color:var(--muted); border-bottom:1px solid var(--border); margin-bottom:4px; white-space:nowrap}
+  .dfeld{display:block; margin:0 0 11px; font-size:12.5px; color:var(--muted)}
+  .dfeld input, .dfeld select{
+    display:block; width:100%; margin-top:5px; box-sizing:border-box;
+    background:var(--surface); color:var(--fg); border:1px solid var(--border);
+    border-radius:10px; padding:10px 12px; font-size:15px; min-height:0;
+  }
+  .dfeld input:disabled{opacity:.55}
+  .pRow{display:flex; align-items:center; gap:8px; padding:8px 11px; border:1px solid var(--border); border-radius:11px; margin-bottom:7px; font-size:13.5px; line-height:1.35}
+  .pRow small{color:var(--muted)}
+  .pRow button{flex:none; min-height:34px; padding:0 11px; font-size:13px; background:var(--surface); border:1px solid var(--border); color:var(--fg); border-radius:8px}
+
   /* ===== PDF-Druck der Abstands-Tabelle (einheitliche SYNIUM-PDF-Einstellungen) ===== */
   #printTbl{display:none}
   @media print{
@@ -945,13 +959,18 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </div>
 <header>
   <img id="hdrLogo" alt="" onerror="this.style.display='none'">
-  <h1>GPS Wegmessung</h1>
+  <div><h1>GPS Wegmessung</h1><div id="projZeile" hidden></div></div>
   <div id="gpsState">GPS: <b class="bad" id="gpsTxt">aus</b><br><span id="accTxt">Genauigkeit: —</span></div>
 </header>
 
 <div id="menuPanel" hidden>
+  <div id="menuUser">👤 Nicht angemeldet</div>
   <button class="mitem" id="btnTabelle">📏 Abstands-Tabelle</button>
+  <button class="mitem" id="btnPunkte">📍 Punkte verwalten</button>
   <button class="mitem" id="btnDb">📂 Gespeicherte Messungen</button>
+  <button class="mitem" id="btnProj">🏗 Projektdaten</button>
+  <button class="mitem" id="btnUsers" style="display:none">👥 Userdaten</button>
+  <button class="mitem" id="btnLogout" style="display:none">🚪 Abmelden</button>
 </div>
 
 <div id="panel">
@@ -1005,6 +1024,73 @@ svg.leaflet-image-layer.leaflet-interactive path {
   </div>
 </dialog>
 <input type="file" id="dbFile" accept=".json" hidden>
+
+<!-- Anmeldung (SYNIUM-Benutzersystem — derselbe Master-Admin wie in allen Apps) -->
+<dialog id="loginDlg">
+  <div class="dhead">👤 Anmelden</div>
+  <div class="dbody">
+    <label class="dfeld">Benutzer
+      <select id="liUser"></select></label>
+    <label class="dfeld">PIN (Master-Admin: Masterschlüssel)
+      <input type="password" id="liPin" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>
+    <p class="dnote" id="liHint" style="margin:0"></p>
+  </div>
+  <div class="dfoot">
+    <button id="liReg">Neu registrieren</button>
+    <span style="flex:1"></span>
+    <button id="liGo" style="background:linear-gradient(135deg,#22c55e,#059669); border:none; color:#fff">✔ Anmelden</button>
+  </div>
+</dialog>
+
+<dialog id="regDlg">
+  <div class="dhead">📝 Neu registrieren<button class="dx" id="regX">✕</button></div>
+  <div class="dbody">
+    <label class="dfeld">Vorname *<input type="text" id="rVor" autocomplete="off"></label>
+    <label class="dfeld">Name *<input type="text" id="rName" autocomplete="off"></label>
+    <label class="dfeld">Benutzername *<input type="text" id="rUser" autocomplete="off"></label>
+    <label class="dfeld">PIN (6 Ziffern) *<input type="password" id="rPin" inputmode="numeric" maxlength="6"></label>
+    <label class="dfeld">PIN wiederholen *<input type="password" id="rPin2" inputmode="numeric" maxlength="6"></label>
+  </div>
+  <div class="dfoot">
+    <button id="rAbbr">Abbrechen</button>
+    <span style="flex:1"></span>
+    <button id="rGo" style="background:linear-gradient(135deg,#22c55e,#059669); border:none; color:#fff">✔ Registrieren</button>
+  </div>
+</dialog>
+
+<!-- Projektdaten: ändern nur Master-Admin/Admin — einsehbar für alle registrierten User -->
+<dialog id="projDlg">
+  <div class="dhead">🏗 Projektdaten<button class="dx" id="projX">✕</button></div>
+  <div class="dbody">
+    <label class="dfeld">Name des Projekts<input type="text" id="pjName" autocomplete="off"></label>
+    <label class="dfeld">Betriebsstelle<input type="text" id="pjBst" autocomplete="off"></label>
+    <p class="dnote" id="pjHinweis" style="margin:0"></p>
+  </div>
+  <div class="dfoot">
+    <button id="pjOk">Schließen</button>
+    <span style="flex:1"></span>
+    <button id="pjGo" style="background:linear-gradient(135deg,#22c55e,#059669); border:none; color:#fff">✔ Speichern</button>
+  </div>
+</dialog>
+
+<!-- Userdaten (nur Master-Admin): Admin-Rechte vergeben, User löschen -->
+<dialog id="usersDlg">
+  <div class="dhead">👥 Userdaten<button class="dx" id="usersX">✕</button></div>
+  <div class="dbody" id="usersBody"></div>
+  <div class="dfoot"><span style="flex:1"></span><button id="usersOk">OK</button></div>
+</dialog>
+
+<!-- Punkte verwalten: löschen, umbenennen, neue zufügen -->
+<dialog id="pkDlg">
+  <div class="dhead">📍 Punkte verwalten<button class="dx" id="pkX">✕</button></div>
+  <div class="dbody" id="pkBody"></div>
+  <div class="dfoot">
+    <button id="pkNeu">➕ Punkt an aktueller Position</button>
+    <span style="flex:1"></span>
+    <button id="pkOk">OK</button>
+  </div>
+</dialog>
+
 <div id="printTbl"></div>
 
 <script>
@@ -1545,7 +1631,9 @@ $('btnTabPdf').onclick = () => {
   $('printTbl').innerHTML =
     '<img class="pLogo" src="' + $('splashLogo').src + '">' +
     '<h1>Abstands-Tabelle — GPS Wegmessung</h1>' +
-    '<div class="pMeta">Erstellt am: <b>' + now.toLocaleString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + ' Uhr</b>' +
+    '<div class="pMeta">Projekt: <b>' + esc(B.projekt.name || '—') + '</b> &nbsp;·&nbsp; Betriebsstelle: <b>' + esc(B.projekt.betriebsstelle || '—') + '</b>' +
+    '<br>Erstellt am: <b>' + now.toLocaleString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + ' Uhr</b>' +
+    ' &nbsp;·&nbsp; von: <b>' + esc(loggedIn() ? userDisp(sessU()) : '—') + '</b>' +
     '<br>Prüf Tool: SYNIUM GPS Wegmessung &nbsp;·&nbsp; Grundlage: ' + esc(d.quelle) + '</div>' +
     '<table><thead><tr><th style="width:8%">Nr.</th><th>Von</th><th>Nach</th><th style="width:17%">Abstand (m)</th><th style="width:14%">Art</th></tr></thead><tbody>' +
     d.rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td>' + r.m + '</td><td>' + r.art + '</td></tr>').join('') +
@@ -1613,6 +1701,180 @@ $('dbFile').onchange = async e => {
     alert(neu + ' Messung(en) übernommen.');
   }catch(err){ alert('Import fehlgeschlagen: ' + (err.message || err)); }
 };
+
+/* ================= Benutzer, Rollen & Projektdaten (SYNIUM-Benutzersystem) =================
+   Master-Admin ist in allen SYNIUM-Apps derselbe (Masterschlüssel). Neue User registrieren
+   sich mit Namen + 6-stelligem PIN. Projektdaten (Projektname, Betriebsstelle) dürfen nur
+   Master-Admin oder Admins ändern — einsehbar sind sie für alle registrierten User. */
+const B_KEY = 'synium_gps_benutzer_v1';
+const MASTER_KEY = '090714', MASTER_U = '__master__', MASTER_NAME = 'Anis El Aoud';
+let B = { users: [], session: null, projekt: { name:'', betriebsstelle:'' } };
+try{
+  const b = JSON.parse(localStorage.getItem(B_KEY) || 'null');
+  if(b && typeof b === 'object'){
+    B.users = Array.isArray(b.users) ? b.users.filter(u => u && u.benutzername) : [];
+    B.session = (b.session && b.session.u) ? b.session : null;
+    B.projekt = { name: String((b.projekt && b.projekt.name) || ''), betriebsstelle: String((b.projekt && b.projekt.betriebsstelle) || '') };
+  }
+}catch(e){}
+function bSpeicher(){ try{ localStorage.setItem(B_KEY, JSON.stringify(B)); }catch(e){} }
+const loggedIn = () => !!(B.session && B.session.u);
+const sessU = () => loggedIn() ? B.session.u : '';
+function findUser(bn){ return B.users.find(u => u.benutzername.toLowerCase() === String(bn).toLowerCase()); }
+function sessRole(){
+  if(!loggedIn()) return '';
+  if(sessU() === MASTER_U) return 'master';
+  const u = findUser(sessU());
+  return u && u.admin ? 'admin' : 'user';
+}
+function userDisp(bn){
+  if(bn === MASTER_U) return MASTER_NAME;
+  const u = findUser(bn);
+  return u ? ((u.vorname + ' ' + u.name).trim() || u.benutzername) : String(bn || '');
+}
+function applyUserUi(){
+  $('menuUser').innerHTML = loggedIn()
+    ? '👤 <b>' + esc(userDisp(sessU())) + '</b>' +
+      (sessRole() === 'master' ? ' · 🔑 Master-Admin' : sessRole() === 'admin' ? ' · Admin' : '')
+    : '👤 Nicht angemeldet';
+  $('btnUsers').style.display = sessRole() === 'master' ? '' : 'none';
+  $('btnLogout').style.display = loggedIn() ? '' : 'none';
+  const pz = $('projZeile');
+  if(B.projekt.name || B.projekt.betriebsstelle){
+    pz.hidden = false;
+    pz.textContent = '🏗 ' + [B.projekt.name, B.projekt.betriebsstelle].filter(Boolean).join(' · ');
+  } else pz.hidden = true;
+}
+/* Anmeldung — Pflicht beim Start (wie in den anderen SYNIUM-Apps) */
+function openLogin(){
+  $('liUser').innerHTML =
+    B.users.map(u => '<option value="' + esc(u.benutzername) + '">' + esc(userDisp(u.benutzername)) + '</option>').join('') +
+    '<option value="' + MASTER_U + '">🔑 ' + esc(MASTER_NAME) + ' — Master-Admin (Masterschlüssel)</option>';
+  $('liPin').value = '';
+  $('liHint').textContent = B.users.length ? '' :
+    'Noch keine User registriert — bitte „Neu registrieren" oder als Master-Admin anmelden.';
+  if(!$('loginDlg').open) $('loginDlg').showModal();
+}
+$('loginDlg').addEventListener('cancel', e => e.preventDefault());   // Anmeldung ist Pflicht
+$('liGo').onclick = () => {
+  const bn = $('liUser').value, pin = $('liPin').value.trim();
+  if(bn === MASTER_U){
+    if(pin !== MASTER_KEY){ alert('Masterschlüssel falsch.'); return; }
+  } else {
+    const u = findUser(bn);
+    if(!u || u.pin !== pin){ alert('PIN falsch.'); return; }
+  }
+  B.session = { u: bn, seit: Date.now() };
+  bSpeicher(); applyUserUi();
+  $('loginDlg').close();
+};
+$('liReg').onclick = () => {
+  ['rVor','rName','rUser','rPin','rPin2'].forEach(id => $(id).value = '');
+  delete $('rUser').dataset.manuell;
+  $('regDlg').showModal();
+};
+const regUserVorschlag = () => {
+  const v = $('rVor').value.trim().toLowerCase(), n = $('rName').value.trim().toLowerCase();
+  if(v && n && !$('rUser').dataset.manuell) $('rUser').value = (v + '.' + n).replace(/[^a-z0-9.\-_]/g, '');
+};
+$('rVor').oninput = $('rName').oninput = regUserVorschlag;
+$('rUser').oninput = () => { $('rUser').dataset.manuell = '1'; };
+$('rGo').onclick = () => {
+  const vor = $('rVor').value.trim(), nach = $('rName').value.trim(), bn = $('rUser').value.trim().toLowerCase();
+  const pin = $('rPin').value.trim(), pin2 = $('rPin2').value.trim();
+  if(!vor || !nach || !bn){ alert('Bitte Vorname, Name und Benutzername angeben.'); return; }
+  if(findUser(bn) || bn === MASTER_U){ alert('Der Benutzername ist bereits vergeben.'); return; }
+  if(!/^\d{6}$/.test(pin)){ alert('Der PIN muss aus genau 6 Ziffern bestehen.'); return; }
+  if(pin !== pin2){ alert('Die PIN-Wiederholung stimmt nicht überein.'); return; }
+  B.users.push({ benutzername: bn, vorname: vor, name: nach, pin, admin: false, seit: Date.now() });
+  B.session = { u: bn, seit: Date.now() };
+  bSpeicher(); applyUserUi();
+  $('regDlg').close();
+  if($('loginDlg').open) $('loginDlg').close();
+};
+$('regX').onclick = $('rAbbr').onclick = () => $('regDlg').close();
+$('btnLogout').onclick = () => {
+  $('menuPanel').hidden = true;
+  B.session = null; bSpeicher(); applyUserUi(); openLogin();
+};
+/* Projektdaten */
+$('btnProj').onclick = () => {
+  $('menuPanel').hidden = true;
+  const darf = sessRole() === 'master' || sessRole() === 'admin';
+  $('pjName').value = B.projekt.name; $('pjBst').value = B.projekt.betriebsstelle;
+  $('pjName').disabled = $('pjBst').disabled = !darf;
+  $('pjHinweis').textContent = darf ? '' :
+    'Ändern kann die Projektdaten nur der Master-Admin oder ein Admin — hier sind sie für alle registrierten User einsehbar.';
+  $('pjGo').style.display = darf ? '' : 'none';
+  $('projDlg').showModal();
+};
+$('pjGo').onclick = () => {
+  B.projekt = { name: $('pjName').value.trim(), betriebsstelle: $('pjBst').value.trim() };
+  bSpeicher(); applyUserUi();
+  $('projDlg').close();
+};
+$('projX').onclick = $('pjOk').onclick = () => $('projDlg').close();
+/* Userdaten (nur Master-Admin) */
+function renderUsers(){
+  $('usersBody').innerHTML = B.users.length ? B.users.map(u =>
+    '<div class="pRow"><div><b>' + esc((u.vorname + ' ' + u.name).trim()) + '</b><br><small>' + esc(u.benutzername) + '</small></div>' +
+    '<span style="flex:1"></span>' +
+    '<label style="display:inline-flex; align-items:center; gap:6px; font-size:12.5px"><input type="checkbox" data-adm="' + esc(u.benutzername) + '"' + (u.admin ? ' checked' : '') + '> Admin</label>' +
+    '<button data-udel="' + esc(u.benutzername) + '">🗑</button></div>').join('')
+    : '<p class="dnote" style="margin:0">Noch keine registrierten User.</p>';
+  $('usersBody').querySelectorAll('input[data-adm]').forEach(cb => cb.onchange = () => {
+    const u = findUser(cb.dataset.adm);
+    if(u){ u.admin = cb.checked; bSpeicher(); }
+  });
+  $('usersBody').querySelectorAll('button[data-udel]').forEach(b => b.onclick = () => {
+    if(!confirm('User „' + userDisp(b.dataset.udel) + '" wirklich löschen?')) return;
+    B.users = B.users.filter(x => x.benutzername.toLowerCase() !== b.dataset.udel.toLowerCase());
+    bSpeicher(); renderUsers();
+  });
+}
+$('btnUsers').onclick = () => {
+  $('menuPanel').hidden = true;
+  if(sessRole() !== 'master') return;
+  renderUsers(); $('usersDlg').showModal();
+};
+$('usersX').onclick = $('usersOk').onclick = () => $('usersDlg').close();
+
+/* ================= Punkte verwalten: löschen, umbenennen, neue zufügen ================= */
+function renderPunkteDlg(){
+  $('pkBody').innerHTML = marks.length ? marks.map((m, i) =>
+    '<div class="pRow"><div><b>' + esc(m.name) + '</b><br><small>' +
+    m.lat.toFixed(5) + ', ' + m.lng.toFixed(5) +
+    (m.wegD != null && isFinite(m.wegD) ? ' · km-Stand ' + Math.round(m.wegD) + ' m' : '') + '</small></div>' +
+    '<span style="flex:1"></span>' +
+    '<button data-pren="' + i + '" title="Umbenennen">✏</button>' +
+    '<button data-pdel="' + i + '" title="Löschen">🗑</button></div>').join('')
+    : '<p class="dnote" style="margin:0">Noch keine markierten Punkte — mit 📌, langem Druck auf die Karte oder „➕" anlegen.</p>';
+  $('pkBody').querySelectorAll('button[data-pdel]').forEach(b => b.onclick = () => {
+    const i = +b.dataset.pdel;
+    if(!confirm('Punkt „' + marks[i].name + '" löschen?')) return;
+    markLoeschen(i); renderPunkteDlg();
+  });
+  $('pkBody').querySelectorAll('button[data-pren]').forEach(b => b.onclick = () => {
+    const i = +b.dataset.pren;
+    const neu = prompt('Neue Bezeichnung:', marks[i].name);
+    if(neu === null || !neu.trim()) return;
+    marks[i].name = neu.trim();
+    alleMarksNeu(); messUpdate(); markSpeichern(); renderPunkteDlg();
+  });
+}
+$('btnPunkte').onclick = () => { $('menuPanel').hidden = true; renderPunkteDlg(); $('pkDlg').showModal(); };
+$('pkNeu').onclick = () => {
+  if(!map.hasLayer(posPunkt)){ alert('Der Standort ist noch nicht bekannt — bitte warten oder den Punkt per langem Druck auf die Karte setzen.'); return; }
+  const name = neuerMarkName();
+  if(name === null) return;
+  const ll = posPunkt.getLatLng();
+  markAnlegen(ll.lat, ll.lng, name, punkte.length ? { wegD: distanz, tid: trackId } : null);
+  renderPunkteDlg();
+};
+$('pkX').onclick = $('pkOk').onclick = () => $('pkDlg').close();
+
+applyUserUi();
+setTimeout(() => { if(!loggedIn()) openLogin(); }, 4900);   // Anmeldung nach dem Intro
 
 anzeigen();
 starteOrtung(true);   // Standort sofort beim Öffnen anzeigen — die Messung startet erst mit ▶ Start
