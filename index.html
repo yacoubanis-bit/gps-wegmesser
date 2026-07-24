@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1122">
-<title>SYNIUM — GPS Wegmessung</title>
+<title>SYNIUM — LST Abstandmessung</title>
 <!-- App-Symbol (SYNIUM-Firmenlogo) für „Zum Startbildschirm hinzufügen" -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
@@ -717,24 +717,36 @@ svg.leaflet-image-layer.leaflet-interactive path {
   }
   .chip b{color:var(--fg)}
 
-  /* Karte */
-  #map{flex:1; min-height:0; background:#0d1430}
+  /* Karte — dreht sich in Fahrtrichtung (course-up): der Container ist größer als der
+     sichtbare Ausschnitt, damit beim Drehen keine Ecken freiliegen */
+  #mapWrap{flex:1; min-height:0; position:relative; overflow:hidden; background:#0d1430}
+  #map{
+    position:absolute; left:50%; top:50%; width:150%; height:150%;
+    transform:translate(-50%,-50%) rotate(0deg); transform-origin:center center;
+    transition:transform .6s ease; will-change:transform; background:#0d1430;
+  }
   .leaflet-container{background:#dfe8dd}
+  #osmCredit{
+    position:absolute; right:6px; bottom:4px; z-index:900; font-size:9.5px; color:#333;
+    background:rgba(255,255,255,.72); border-radius:6px; padding:1px 6px; pointer-events:none;
+  }
+  .posArrowWrap{background:none; border:none}
+  .posArrowWrap svg{display:block; transition:transform .5s ease; filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}
 
-  /* Tasten */
+  /* Tasten — kompakt, damit die Karte möglichst viel Platz bekommt */
   #bar{
-    flex:none; display:flex; gap:8px; padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    flex:none; display:flex; gap:7px; padding:7px 10px calc(7px + env(safe-area-inset-bottom));
     background:rgba(30,41,74,.75); backdrop-filter:blur(14px); border-top:1px solid var(--border);
   }
   button{
-    flex:1; min-height:52px; border:none; border-radius:14px; font-size:15.5px; font-weight:800;
+    flex:1; min-height:40px; border:none; border-radius:11px; font-size:13.5px; font-weight:800;
     letter-spacing:.3px; color:#fff; cursor:pointer; touch-action:manipulation;
   }
   #btnStart{background:linear-gradient(135deg, #22c55e, #059669); box-shadow:0 6px 18px rgba(34,197,94,.35)}
   #btnStart.laeuft{background:linear-gradient(135deg, #f59e0b, #d97706); box-shadow:0 6px 18px rgba(245,158,11,.3)}
-  #btnReset{flex:0 0 30%; background:var(--surface); border:1px solid var(--border); color:var(--muted)}
+  #btnReset{flex:0 0 26%; background:var(--surface); border:1px solid var(--border); color:var(--muted); font-size:12.5px}
   #btnFolgen, #btnMark{
-    flex:0 0 56px; background:var(--surface); border:1px solid var(--border); color:var(--muted); font-size:20px;
+    flex:0 0 44px; background:var(--surface); border:1px solid var(--border); color:var(--muted); font-size:17px;
   }
   #btnFolgen.an{color:#fff; background:linear-gradient(135deg, #6366f1, #4f46e5)}
 
@@ -750,7 +762,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .segTip::before{display:none}
   /* Mess-Infofeld über der Tastenleiste */
   #messInfo{
-    position:fixed; left:10px; right:10px; bottom:calc(84px + env(safe-area-inset-bottom));
+    position:fixed; left:10px; right:10px; bottom:calc(66px + env(safe-area-inset-bottom));
     z-index:1500; display:none; background:rgba(19,28,54,.94); border:1px solid var(--border);
     border-radius:12px; padding:9px 12px; font-size:12.5px; line-height:1.6; color:var(--fg);
     box-shadow:0 8px 26px rgba(0,0,0,.45); font-variant-numeric:tabular-nums;
@@ -800,7 +812,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .dbRow button{flex:none; min-height:36px; padding:0 12px; font-size:12.5px; font-weight:700; background:var(--surface); border:1px solid var(--border); color:var(--fg); border-radius:9px}
 
   /* Benutzer/Projekt/Punkte-Dialoge */
-  #projZeile{font-size:10.5px; color:var(--muted); line-height:1.25; margin-top:2px}
+  #projZeile{font-size:10.5px; color:var(--muted); line-height:1.25; margin-top:2px; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46vw}
   #menuUser{padding:8px 14px 7px; font-size:12px; color:var(--muted); border-bottom:1px solid var(--border); margin-bottom:4px; white-space:nowrap}
   .dfeld{display:block; margin:0 0 11px; font-size:12.5px; color:var(--muted)}
   .dfeld input, .dfeld select{
@@ -917,7 +929,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
   @keyframes drift1{to{transform:translate(9vmax,7vmax) scale(1.12)}}
   @keyframes drift2{to{transform:translate(-8vmax,-6vmax) scale(1.08)}}
   @keyframes gridMove{to{background-position:0 46px, 46px 0}}
-  #hdrLogo{height:46px; display:block; flex:none}
+  /* Logo links, darunter LINKSBÜNDIG die Projektdaten */
+  #hdrLinks{display:flex; flex-direction:column; align-items:flex-start; gap:2px; flex:none; min-width:0}
+  #hdrLogo{height:56px; display:block; flex:none}
   /* 5-Zoll-Smartphones (schmale Displays) */
   @media (max-width:380px){
     header h1{font-size:15px}
@@ -925,7 +939,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     #dist{font-size:42px}
     #distEinheit{font-size:16px}
     .chip{font-size:10.5px; padding:4px 9px}
-    button{min-height:48px; font-size:14px}
+    button{min-height:38px; font-size:12.5px}
   }
 </style>
 </head>
@@ -954,12 +968,15 @@ svg.leaflet-image-layer.leaflet-interactive path {
       onerror="this.replaceWith(Object.assign(document.createElement('b'),{textContent:'SYNIUM',style:'font-size:42px'}))"></div>
   </div>
   <div class="bar"><i></i></div>
-  <div class="tag">GPS Wegmessung</div>
+  <div class="tag">LST Abstandmessung</div>
   <div class="skip">Tippen zum &Uuml;berspringen</div>
 </div>
 <header>
-  <img id="hdrLogo" alt="" onerror="this.style.display='none'">
-  <div><h1>GPS Wegmessung</h1><div id="projZeile" hidden></div></div>
+  <div id="hdrLinks">
+    <img id="hdrLogo" alt="" onerror="this.style.display='none'">
+    <div id="projZeile" hidden></div>
+  </div>
+  <h1>LST Abstandmessung</h1>
   <div id="gpsState">GPS: <b class="bad" id="gpsTxt">aus</b><br><span id="accTxt">Genauigkeit: —</span></div>
 </header>
 
@@ -978,12 +995,14 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <div id="chips">
     <span class="chip">⏱ <b id="dauer">00:00</b></span>
     <span class="chip">🚶 <b id="tempo">0,0</b> km/h</span>
-    <span class="chip">Ø <b id="schnitt">0,0</b> km/h</span>
     <span class="chip">📍 <b id="punkte">0</b> Punkte</span>
   </div>
 </div>
 
-<div id="map"></div>
+<div id="mapWrap">
+  <div id="map"></div>
+  <div id="osmCredit">© OpenStreetMap-Mitwirkende</div>
+</div>
 
 <div id="messInfo"></div>
 
@@ -1129,17 +1148,40 @@ let letzterFix = null;    // letzter GEWERTETER Punkt
 let tempoAktuell = 0;
 
 /* ================= Karte (OpenStreetMap) ================= */
-const map = L.map('map', { zoomControl:false, attributionControl:true }).setView([49.16, 11.68], 14);
-L.control.zoom({ position:'topright' }).addTo(map);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-}).addTo(map);
+const map = L.map('map', { zoomControl:false, attributionControl:false }).setView([49.16, 11.68], 14);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 /* Fahrweg: blasses (entsättigtes) Blau, 50 % transparent */
 const pfad = L.polyline([], { color:'#6699cc', weight:5, opacity:.5 }).addTo(map);
-const posPunkt = L.circleMarker([0, 0], { radius:8, color:'#fff', weight:2.5, fillColor:'#4f46e5', fillOpacity:1 });
+/* Positions-PFEIL: zeigt die Bewegungsrichtung — die Karte dreht sich so mit,
+   dass der Pfeil auf dem Bildschirm immer nach OBEN zeigt (course-up) */
+const posIcon = L.divIcon({ className:'posArrowWrap', iconSize:[34, 34], iconAnchor:[17, 17],
+  html:'<svg width="34" height="34" viewBox="0 0 34 34"><path d="M17 4 L26 27 L17 21 L8 27 Z" fill="#4f46e5" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/></svg>' });
+const posPunkt = L.marker([0, 0], { icon: posIcon, interactive:false, keyboard:false });
 const accKreis = L.circle([0, 0], { radius:0, color:'#6366f1', weight:1, opacity:.35, fillColor:'#6366f1', fillOpacity:.12 });
-map.on('dragstart', () => setFolgen(false));   // manuelles Verschieben schaltet das Folgen aus
+map.on('dragstart', () => setFolgen(false));   // manuelles Verschieben schaltet Folgen + Drehung aus
+
+/* ===== Karten-Drehung in Fahrtrichtung ===== */
+const mapEl = $('map');
+let dreh = 0;      // aktuelle Drehung der Karte (fortlaufende Grad)
+let kurs = null;   // letzte bekannte Bewegungsrichtung (0° = Nord)
+let letztePos = null;
+function setzeDrehung(ziel){
+  const diff = ((ziel - dreh) % 360 + 540) % 360 - 180;   // immer den kürzesten Weg drehen
+  dreh += diff;
+  mapEl.style.transform = 'translate(-50%,-50%) rotate(' + dreh + 'deg)';
+}
+function pfeilDrehen(){
+  // Pfeil liegt IM gedrehten Kartencontainer: nur um den Kurs drehen —
+  // mit Kartendrehung −Kurs zeigt er auf dem Bildschirm dann exakt nach oben
+  const el = posPunkt.getElement();
+  if(el && el.firstChild) el.firstChild.style.transform = 'rotate(' + (kurs || 0) + 'deg)';
+}
+function bearing(a, b){
+  const rad = x => x * Math.PI / 180;
+  const y = Math.sin(rad(b.lng - a.lng)) * Math.cos(rad(b.lat));
+  const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lng - a.lng));
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
 
 /* ================= Entfernung (Haversine, Meter) ================= */
 function entf(a, b){
@@ -1185,11 +1227,17 @@ function fix(pos){
   // geglättete Position (Kalman) — für Anzeige, Pfad und Streckenmessung.
   // Bewegung laut GPS-Empfänger → Filter reagiert schnell (Kurven exakt), sonst stark glätten.
   const bewegt = (typeof c.speed === 'number' && isFinite(c.speed) && c.speed > 0.5);
-  const g = kalman(c.latitude, c.longitude, c.accuracy, t, bewegt ? 3.5 : 1.5);
+  const g = kalman(c.latitude, c.longitude, c.accuracy, t, bewegt ? Math.max(3.5, c.speed * 1.5) : 1.5);
   const p = { lat:g.lat, lng:g.lng, t, acc:c.accuracy };
   posPunkt.setLatLng(p); accKreis.setLatLng(p).setRadius(c.accuracy);
   if(!map.hasLayer(posPunkt)){ posPunkt.addTo(map); accKreis.addTo(map); map.setView(p, 17); }
   if(folgen) map.panTo(p, { animate:true, duration:.4 });
+  // Bewegungsrichtung: Hardware-Kurs des GPS-Empfängers, sonst aus der Spur berechnet
+  if(bewegt && typeof c.heading === 'number' && isFinite(c.heading)) kurs = c.heading;
+  else if(letztePos && entf(letztePos, p) > 3) kurs = bearing(letztePos, p);
+  letztePos = p;
+  pfeilDrehen();
+  if(folgen && kurs != null) setzeDrehung(-kurs);   // Karte dreht: Pfeil zeigt immer nach oben
   if(!running) return;
   if(c.accuracy > 25){ $('accTxt').textContent += ' (zu ungenau — warte)'; return; }
   // Hardware-Stillstand: meldet der GPS-Empfänger Geschwindigkeit ≈ 0, wird nichts aufsummiert
@@ -1240,8 +1288,6 @@ function anzeigen(){
   const teile = [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map(x => String(x).padStart(2, '0'));
   $('dauer').textContent = (s >= 3600 ? teile : teile.slice(1)).join(':');
   $('tempo').textContent = tempoAktuell.toLocaleString('de-DE', { minimumFractionDigits:1, maximumFractionDigits:1 });
-  const h = ms / 3600000;
-  $('schnitt').textContent = (h > 0 ? distanz / 1000 / h : 0).toLocaleString('de-DE', { minimumFractionDigits:1, maximumFractionDigits:1 });
   $('punkte').textContent = punkte.length;
 }
 setInterval(() => { if(running) anzeigen(); }, 1000);
@@ -1297,6 +1343,9 @@ $('btnReset').onclick = () => {
 function setFolgen(an){
   folgen = an;
   $('btnFolgen').classList.toggle('an', an);
+  if(!an) setzeDrehung(0);            // ohne Folgen: Karte zurück auf Nord-oben
+  else if(kurs != null) setzeDrehung(-kurs);
+  pfeilDrehen();
 }
 $('btnFolgen').onclick = () => {
   setFolgen(!folgen);
@@ -1621,7 +1670,7 @@ $('btnTabExcel').onclick = () => {
   const zeilen = [['Nr.', 'Von', 'Nach', 'Abstand (m)', 'Art'],
     ...d.rows.map(r => [r.nr, r.von, r.nach, r.m, r.art]),
     ['', '', 'Gesamt', d.gesamt, '']];
-  ladeBlob(xlsxBlob(zeilen, 'Abstände'), 'GPS_Wegmessung_Abstaende_' + zeitStempel() + '.xlsx');
+  ladeBlob(xlsxBlob(zeilen, 'Abstände'), 'LST_Abstandmessung_' + zeitStempel() + '.xlsx');
 };
 /* PDF-Export der Tabelle (über den Druckdialog, einheitliches SYNIUM-Layout) */
 $('btnTabPdf').onclick = () => {
@@ -1630,11 +1679,11 @@ $('btnTabPdf').onclick = () => {
   const now = new Date();
   $('printTbl').innerHTML =
     '<img class="pLogo" src="' + $('splashLogo').src + '">' +
-    '<h1>Abstands-Tabelle — GPS Wegmessung</h1>' +
+    '<h1>Abstands-Tabelle — LST Abstandmessung</h1>' +
     '<div class="pMeta">Projekt: <b>' + esc(B.projekt.name || '—') + '</b> &nbsp;·&nbsp; Betriebsstelle: <b>' + esc(B.projekt.betriebsstelle || '—') + '</b>' +
     '<br>Erstellt am: <b>' + now.toLocaleString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + ' Uhr</b>' +
     ' &nbsp;·&nbsp; von: <b>' + esc(loggedIn() ? userDisp(sessU()) : '—') + '</b>' +
-    '<br>Prüf Tool: SYNIUM GPS Wegmessung &nbsp;·&nbsp; Grundlage: ' + esc(d.quelle) + '</div>' +
+    '<br>Prüf Tool: SYNIUM LST Abstandmessung &nbsp;·&nbsp; Grundlage: ' + esc(d.quelle) + '</div>' +
     '<table><thead><tr><th style="width:8%">Nr.</th><th>Von</th><th>Nach</th><th style="width:17%">Abstand (m)</th><th style="width:14%">Art</th></tr></thead><tbody>' +
     d.rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td>' + r.m + '</td><td>' + r.art + '</td></tr>').join('') +
     '<tr class="ges"><td></td><td></td><td>Gesamt</td><td>' + d.gesamt + '</td><td></td></tr>' +
@@ -1684,7 +1733,7 @@ $('btnDb').onclick = () => { $('menuPanel').hidden = true; renderDb(); $('dbDlg'
 $('dbX').onclick = $('dbOk').onclick = () => $('dbDlg').close();
 $('btnDbExport').onclick = () => {
   ladeBlob(new Blob([JSON.stringify({ app:'SYNIUM-GPS-DB', version:1, exportiert:new Date().toISOString(), messungen: dbLese() })],
-    { type:'application/json' }), 'GPS_Wegmessung_Datenbank_' + zeitStempel() + '.json');
+    { type:'application/json' }), 'LST_Abstandmessung_Datenbank_' + zeitStempel() + '.json');
 };
 $('btnDbImport').onclick = () => $('dbFile').click();
 $('dbFile').onchange = async e => {
