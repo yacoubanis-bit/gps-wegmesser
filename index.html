@@ -1034,8 +1034,9 @@ splashEl.addEventListener('click', hideSplash);
 
 /* ================= Zustand ================= */
 let running = false, watchId = null, wakeLock = null, folgen = true;
-let punkte = [];          // {lat, lng, t, acc}
+let punkte = [];          // {lat, lng, t, acc, d: bis hier zurückgelegter Weg in m}
 let distanz = 0;          // Meter
+let trackId = '';         // Kennung der aktuellen Weg-Aufzeichnung (für Weg-Abstände der Punkte)
 let dauerMs = 0;          // aufsummierte Laufzeit (ohne Pausen)
 let startT = 0;           // Beginn des aktuellen Laufabschnitts
 let letzterFix = null;    // letzter GEWERTETER Punkt
@@ -1108,13 +1109,15 @@ function fix(pos){
   // Hardware-Stillstand: meldet der GPS-Empfänger Geschwindigkeit ≈ 0, wird nichts aufsummiert
   const still = (typeof c.speed === 'number' && isFinite(c.speed) && c.speed >= 0 && c.speed < 0.3);
   if(!letzterFix){
+    if(!punkte.length) trackId = String(Date.now());   // neue Weg-Aufzeichnung beginnt
+    p.d = distanz;
     letzterFix = p; punkte.push(p); pfad.addLatLng(p); speichern(); anzeigen();
     return;
   }
   if(still){ tempoAktuell = 0; anzeigen(); return; }
   const d = entf(letzterFix, p);
   const dt = Math.max(0.3, (p.t - letzterFix.t) / 1000);
-  if(d / dt > 25) return;                                   // unrealistischer Sprung
+  if(d / dt > 45) return;                                   // unrealistischer Sprung (> 160 km/h)
   // Stillstands-Drift: Rauschen wandert nur mit ~Wurzel der Zeit — echtes Gehen linear.
   // Unter 0,35 m/s gegenüber dem Anker wird nicht gezählt.
   if(d / dt < 0.35){ tempoAktuell = 0; anzeigen(); return; }
@@ -1124,8 +1127,10 @@ function fix(pos){
   if(d < schwelle) return;
   distanz += d;
   tempoAktuell = (d / dt) * 3.6;
+  p.d = distanz;   // Kilometerstand der Spur an diesem Wegpunkt
   letzterFix = p; punkte.push(p); pfad.addLatLng(p);
   speichern(); anzeigen();
+  if(auswahl.length === 1) messUpdate();   // Echtzeit: zurückgelegter Weg seit dem gewählten Punkt
 }
 function fixFehler(err){
   $('gpsTxt').textContent = err.code === 1 ? 'verweigert' : 'kein Signal';
@@ -1196,7 +1201,7 @@ $('btnStart').onclick = () => running ? pause() : start();
 $('btnReset').onclick = () => {
   if(!confirm('Strecke wirklich zurücksetzen?\n\nDer gemessene Weg (' + Math.round(distanz) + ' m) und der Pfad auf der Karte werden gelöscht.')) return;
   if(running) pause();
-  punkte = []; distanz = 0; dauerMs = 0; letzterFix = null; tempoAktuell = 0;
+  punkte = []; distanz = 0; dauerMs = 0; letzterFix = null; tempoAktuell = 0; trackId = '';
   kalmanReset();
   pfad.setLatLngs([]);
   $('btnStart').textContent = '▶ Start';
@@ -1243,10 +1248,31 @@ function alleMarksNeu(){
   marks.forEach((_, j) => zeichneMark(j));
   marks.forEach((_, j) => markStil(j));
 }
-function markAnlegen(lat, lng, name){
-  marks.push({ lat, lng, name });
+/* Punkt anlegen — weg = {wegD, tid}: Kilometerstand der Spur an diesem Punkt.
+   Damit werden Abstände zwischen Punkten als ZURÜCKGELEGTER WEG gemessen (blaue Spur),
+   nicht als Luftlinie — wie bei einem Navigationssystem. */
+function markAnlegen(lat, lng, name, weg){
+  marks.push({ lat, lng, name,
+    wegD: (weg && isFinite(weg.wegD)) ? weg.wegD : null,
+    tid: (weg && weg.tid) ? String(weg.tid) : null });
   zeichneMark(marks.length - 1);
   markSpeichern();
+}
+/* Nächster Spur-Punkt zu einer Kartenposition (für per Karte gesetzte Punkte) */
+function spurAnschluss(lat, lng){
+  let best = null, bestD = Infinity;
+  for(const p of punkte){
+    const d = entf({ lat, lng }, p);
+    if(d < bestD){ bestD = d; best = p; }
+  }
+  return (best && bestD <= 50 && isFinite(best.d)) ? { wegD: best.d, tid: trackId } : null;
+}
+/* Abstand zwischen zwei Punkten: zurückgelegter Weg (wenn beide an derselben Spur
+   hängen) — sonst Luftlinie als Rückfall */
+function abstand(a, b){
+  if(a && b && a.tid && a.tid === b.tid && isFinite(a.wegD) && isFinite(b.wegD))
+    return { m: Math.abs(b.wegD - a.wegD), weg: true };
+  return { m: entf(a, b), weg: false };
 }
 function markLoeschen(i){
   marks.splice(i, 1);
@@ -1270,22 +1296,31 @@ function messUpdate(){
   if(!auswahl.length){ box.style.display = 'none'; box.innerHTML = ''; return; }
   box.style.display = '';
   if(auswahl.length === 1){
-    box.innerHTML = '📌 <b>' + esc(marks[auswahl[0]].name) + '</b> gewählt — weitere Punkte antippen, um Abstände zu messen.' + leerKnopf;
+    const m0 = marks[auswahl[0]];
+    // Echtzeit: zurückgelegter Weg von diesem Punkt bis zur aktuellen Position
+    let live = '';
+    if(m0.tid && m0.tid === trackId && isFinite(m0.wegD) && punkte.length)
+      live = '<br>Zurückgelegter Weg seit „' + esc(m0.name) + '": <b>' + Math.round(Math.abs(distanz - m0.wegD)) + ' m</b> (live)';
+    box.innerHTML = '📌 <b>' + esc(m0.name) + '</b> gewählt — weitere Punkte antippen, um Abstände zu messen.' + live + leerKnopf;
   } else {
     const pts = auswahl.map(i => marks[i]);
     messLinie = L.polyline(pts.map(p => [p.lat, p.lng]),
       { color:'#22c55e', weight:3, opacity:.85, dashArray:'6 9' }).addTo(map);
-    const zeilen = []; let ges = 0;
+    const zeilen = []; let ges = 0, alleWeg = true;
     for(let k = 1; k < pts.length; k++){
-      const d = entf(pts[k - 1], pts[k]); ges += d;
-      zeilen.push(esc(pts[k - 1].name) + ' → ' + esc(pts[k].name) + ': <b>' + Math.round(d) + ' m</b>');
+      const a = abstand(pts[k - 1], pts[k]); ges += a.m;
+      if(!a.weg) alleWeg = false;
+      zeilen.push(esc(pts[k - 1].name) + ' → ' + esc(pts[k].name) + ': <b>' + Math.round(a.m) + ' m</b>' +
+        (a.weg ? '' : ' <small style="color:var(--faint)">(Luftlinie)</small>'));
       const tt = L.tooltip({ permanent:true, direction:'center', className:'segTip' })
         .setLatLng([(pts[k - 1].lat + pts[k].lat) / 2, (pts[k - 1].lng + pts[k].lng) / 2])
-        .setContent(Math.round(d) + ' m').addTo(map);
+        .setContent(Math.round(a.m) + ' m').addTo(map);
       messTips.push(tt);
     }
     box.innerHTML = zeilen.join('<br>') +
-      (pts.length > 2 ? '<br>Gesamt: <b>' + Math.round(ges) + ' m</b>' : '') + leerKnopf;
+      (pts.length > 2 ? '<br>Gesamt: <b>' + Math.round(ges) + ' m</b>' : '') +
+      (alleWeg ? '' : '<br><small style="color:var(--faint)">Luftlinie = Punkt liegt nicht an der aufgezeichneten Spur</small>') +
+      leerKnopf;
   }
   const b = $('messLeer');
   if(b) b.onclick = () => { auswahl = []; marks.forEach((_, j) => markStil(j)); messUpdate(); };
@@ -1304,18 +1339,21 @@ $('btnMark').onclick = () => {
   const name = neuerMarkName();
   if(name === null) return;
   const ll = posPunkt.getLatLng();
-  markAnlegen(ll.lat, ll.lng, name);
+  // aktueller Standort: Kilometerstand der Spur direkt übernehmen
+  markAnlegen(ll.lat, ll.lng, name, punkte.length ? { wegD: distanz, tid: trackId } : null);
 };
 map.on('contextmenu', e => {   // langes Drücken (bzw. Rechtsklick) auf die Karte
   const name = neuerMarkName();
   if(name === null) return;
-  markAnlegen(e.latlng.lat, e.latlng.lng, name);
+  // an die aufgezeichnete Spur anschließen (falls in der Nähe) → Weg-Abstand statt Luftlinie
+  markAnlegen(e.latlng.lat, e.latlng.lng, name, spurAnschluss(e.latlng.lat, e.latlng.lng));
 });
 /* gespeicherte Punkte wiederherstellen */
 try{
   const roh = JSON.parse(localStorage.getItem(MARK_KEY) || '[]');
   if(Array.isArray(roh)) for(const m of roh)
-    if(m && isFinite(+m.lat) && isFinite(+m.lng)) marks.push({ lat:+m.lat, lng:+m.lng, name:String(m.name || 'P') });
+    if(m && isFinite(+m.lat) && isFinite(+m.lng)) marks.push({ lat:+m.lat, lng:+m.lng, name:String(m.name || 'P'),
+      wegD: isFinite(+m.wegD) ? +m.wegD : null, tid: m.tid ? String(m.tid) : null });
   marks.forEach((_, j) => zeichneMark(j));
 }catch(e){}
 
@@ -1331,7 +1369,7 @@ let saveTimer = null;
 function speichern(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    try{ localStorage.setItem(LS_KEY, JSON.stringify({ punkte, distanz, dauerMs })); }catch(e){}
+    try{ localStorage.setItem(LS_KEY, JSON.stringify({ punkte, distanz, dauerMs, trackId })); }catch(e){}
   }, 800);
 }
 (function laden(){
@@ -1339,6 +1377,7 @@ function speichern(){
     const d = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
     if(!d || !Array.isArray(d.punkte) || !d.punkte.length) return;
     punkte = d.punkte; distanz = Number(d.distanz) || 0; dauerMs = Number(d.dauerMs) || 0;
+    trackId = String(d.trackId || '');
     pfad.setLatLngs(punkte);
     letzterFix = punkte[punkte.length - 1];
     map.fitBounds(pfad.getBounds(), { padding:[30, 30] });
@@ -1451,8 +1490,10 @@ function tabDaten(){
   if(auswahl.length >= 2){ kette = auswahl.map(i => marks[i]); quelle = 'gewählte Punkte (Antipp-Reihenfolge)'; }
   else { kette = marks.slice(); quelle = 'alle markierten Punkte (Reihenfolge der Anlage)'; }
   const rows = [];
-  for(let k = 1; k < kette.length; k++)
-    rows.push({ nr:k, von:kette[k - 1].name, nach:kette[k].name, m:Math.round(entf(kette[k - 1], kette[k])) });
+  for(let k = 1; k < kette.length; k++){
+    const a = abstand(kette[k - 1], kette[k]);
+    rows.push({ nr:k, von:kette[k - 1].name, nach:kette[k].name, m:Math.round(a.m), art: a.weg ? 'Weg' : 'Luftlinie' });
+  }
   return { rows, gesamt: rows.reduce((a, r) => a + r.m, 0), quelle };
 }
 function renderTab(){
@@ -1460,7 +1501,7 @@ function renderTab(){
   $('tabQuelle').textContent = d.rows.length
     ? 'Grundlage: ' + d.quelle + ' — Spaltentitel antippen zum Sortieren.'
     : 'Mindestens zwei markierte Punkte nötig — Punkte mit 📌 oder langem Druck auf die Karte anlegen.';
-  const cols = [['nr','Nr.'], ['von','Von'], ['nach','Nach'], ['m','Abstand (m)']];
+  const cols = [['nr','Nr.'], ['von','Von'], ['nach','Nach'], ['m','Abstand (m)'], ['art','Art']];
   $('tabT').querySelector('thead').innerHTML = '<tr>' + cols.map(([k, t]) =>
     '<th data-k="' + k + '">' + t + (tabSort.key === k ? (tabSort.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') + '</tr>';
   const rows = d.rows.slice().sort((a, b) => {
@@ -1468,8 +1509,8 @@ function renderTab(){
     return (typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb), 'de')) * tabSort.dir;
   });
   $('tabT').querySelector('tbody').innerHTML =
-    rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td class="num">' + r.m + '</td></tr>').join('') +
-    (d.rows.length ? '<tr class="ges"><td></td><td></td><td>Gesamt</td><td class="num">' + d.gesamt + '</td></tr>' : '');
+    rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td class="num">' + r.m + '</td><td>' + r.art + '</td></tr>').join('') +
+    (d.rows.length ? '<tr class="ges"><td></td><td></td><td>Gesamt</td><td class="num">' + d.gesamt + '</td><td></td></tr>' : '');
   $('tabT').querySelectorAll('th').forEach(th => th.onclick = () => {
     const k = th.dataset.k;
     if(tabSort.key === k) tabSort.dir *= -1; else tabSort = { key:k, dir:1 };
@@ -1483,9 +1524,9 @@ $('tabX').onclick = $('tabOk').onclick = () => $('tabDlg').close();
 $('btnTabExcel').onclick = () => {
   const d = tabDaten();
   if(!d.rows.length){ alert('Keine Abstände vorhanden — bitte zuerst Punkte markieren.'); return; }
-  const zeilen = [['Nr.', 'Von', 'Nach', 'Abstand (m)'],
-    ...d.rows.map(r => [r.nr, r.von, r.nach, r.m]),
-    ['', '', 'Gesamt', d.gesamt]];
+  const zeilen = [['Nr.', 'Von', 'Nach', 'Abstand (m)', 'Art'],
+    ...d.rows.map(r => [r.nr, r.von, r.nach, r.m, r.art]),
+    ['', '', 'Gesamt', d.gesamt, '']];
   ladeBlob(xlsxBlob(zeilen, 'Abstände'), 'GPS_Wegmessung_Abstaende_' + zeitStempel() + '.xlsx');
 };
 /* PDF-Export der Tabelle (über den Druckdialog, einheitliches SYNIUM-Layout) */
@@ -1498,9 +1539,9 @@ $('btnTabPdf').onclick = () => {
     '<h1>Abstands-Tabelle — GPS Wegmessung</h1>' +
     '<div class="pMeta">Erstellt am: <b>' + now.toLocaleString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + ' Uhr</b>' +
     '<br>Prüf Tool: SYNIUM GPS Wegmessung &nbsp;·&nbsp; Grundlage: ' + esc(d.quelle) + '</div>' +
-    '<table><thead><tr><th style="width:10%">Nr.</th><th>Von</th><th>Nach</th><th style="width:20%">Abstand (m)</th></tr></thead><tbody>' +
-    d.rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td>' + r.m + '</td></tr>').join('') +
-    '<tr class="ges"><td></td><td></td><td>Gesamt</td><td>' + d.gesamt + '</td></tr>' +
+    '<table><thead><tr><th style="width:8%">Nr.</th><th>Von</th><th>Nach</th><th style="width:17%">Abstand (m)</th><th style="width:14%">Art</th></tr></thead><tbody>' +
+    d.rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td>' + r.m + '</td><td>' + r.art + '</td></tr>').join('') +
+    '<tr class="ges"><td></td><td></td><td>Gesamt</td><td>' + d.gesamt + '</td><td></td></tr>' +
     '</tbody></table>';
   $('tabDlg').close();
   setTimeout(() => window.print(), 150);
