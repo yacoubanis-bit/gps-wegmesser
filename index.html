@@ -728,10 +728,33 @@ svg.leaflet-image-layer.leaflet-interactive path {
   #btnStart{background:linear-gradient(135deg, #22c55e, #059669); box-shadow:0 6px 18px rgba(34,197,94,.35)}
   #btnStart.laeuft{background:linear-gradient(135deg, #f59e0b, #d97706); box-shadow:0 6px 18px rgba(245,158,11,.3)}
   #btnReset{flex:0 0 30%; background:var(--surface); border:1px solid var(--border); color:var(--muted)}
-  #btnFolgen{
+  #btnFolgen, #btnMark{
     flex:0 0 56px; background:var(--surface); border:1px solid var(--border); color:var(--muted); font-size:20px;
   }
   #btnFolgen.an{color:#fff; background:linear-gradient(135deg, #6366f1, #4f46e5)}
+
+  /* Markierte Punkte: Namens-Schild und Abstands-Etiketten auf der Karte */
+  .markTip{
+    background:#1a2444; color:#fff; border:1px solid rgba(148,163,214,.45);
+    border-radius:8px; padding:2px 9px; font-weight:700; font-size:11px;
+  }
+  .segTip{
+    background:rgba(34,197,94,.95); color:#04250f; border:none; border-radius:999px;
+    padding:1px 9px; font-weight:800; font-size:11px; box-shadow:0 2px 8px rgba(0,0,0,.4);
+  }
+  .segTip::before{display:none}
+  /* Mess-Infofeld über der Tastenleiste */
+  #messInfo{
+    position:fixed; left:10px; right:10px; bottom:calc(84px + env(safe-area-inset-bottom));
+    z-index:1500; display:none; background:rgba(19,28,54,.94); border:1px solid var(--border);
+    border-radius:12px; padding:9px 12px; font-size:12.5px; line-height:1.6; color:var(--fg);
+    box-shadow:0 8px 26px rgba(0,0,0,.45); font-variant-numeric:tabular-nums;
+  }
+  #messInfo button{
+    flex:none; min-height:0; padding:4px 11px; font-size:12px; font-weight:700;
+    background:var(--surface); border:1px solid var(--border); color:var(--muted);
+    border-radius:8px; margin-left:8px; vertical-align:middle;
+  }
 
   /* Hinweis-Overlay (kein GPS / kein sicherer Kontext) */
   #hinweis{
@@ -873,8 +896,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
 <div id="map"></div>
 
+<div id="messInfo"></div>
+
 <div id="bar">
   <button id="btnFolgen" class="an" title="Karte folgt der Position">🧭</button>
+  <button id="btnMark" title="Aktuellen Standort als Punkt markieren">📌</button>
   <button id="btnStart">▶ Start</button>
   <button id="btnReset">Zurücksetzen</button>
 </div>
@@ -922,7 +948,8 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19,
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 }).addTo(map);
-const pfad = L.polyline([], { color:'#4f46e5', weight:5, opacity:.9 }).addTo(map);
+/* Fahrweg: blasses (entsättigtes) Blau, 50 % transparent */
+const pfad = L.polyline([], { color:'#6699cc', weight:5, opacity:.5 }).addTo(map);
 const posPunkt = L.circleMarker([0, 0], { radius:8, color:'#fff', weight:2.5, fillColor:'#4f46e5', fillOpacity:1 });
 const accKreis = L.circle([0, 0], { radius:0, color:'#6366f1', weight:1, opacity:.35, fillColor:'#6366f1', fillOpacity:.12 });
 map.on('dragstart', () => setFolgen(false));   // manuelles Verschieben schaltet das Folgen aus
@@ -1084,6 +1111,113 @@ $('btnFolgen').onclick = () => {
   setFolgen(!folgen);
   if(folgen && punkte.length) map.panTo(punkte[punkte.length - 1]);
 };
+
+/* ================= Markierte Punkte & automatische Abstands-Messung =================
+   📌 markiert den aktuellen Standort (langes Drücken auf die Karte markiert eine
+   beliebige Stelle). Jeder Punkt bekommt eine Bezeichnung und bleibt gespeichert.
+   Punkte antippen = auswählen — die Abstände (Differenz in Metern) werden automatisch
+   gemessen und an der Linie und im Infofeld angezeigt. Langes Drücken auf einen
+   Punkt löscht ihn. */
+const MARK_KEY = 'synium_gps_marker_v1';
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let marks = [];          // {lat, lng, name}
+let markObjs = [];       // Karten-Objekte je Punkt
+let auswahl = [];        // gewählte Punkte in Antipp-Reihenfolge
+let messLinie = null, messTips = [];
+
+function markSpeichern(){ try{ localStorage.setItem(MARK_KEY, JSON.stringify(marks)); }catch(e){} }
+function zeichneMark(i){
+  const m = marks[i];
+  const cm = L.circleMarker([m.lat, m.lng], { radius:7, color:'#fff', weight:2, fillColor:'#f59e0b', fillOpacity:1 }).addTo(map);
+  cm.bindTooltip(esc(m.name), { permanent:true, direction:'top', offset:[0, -8], className:'markTip' });
+  cm.on('click', e => { L.DomEvent.stop(e); wahlToggle(i); });
+  cm.on('contextmenu', e => {
+    L.DomEvent.stop(e);
+    if(confirm('Punkt „' + m.name + '" löschen?')) markLoeschen(i);
+  });
+  markObjs[i] = cm;
+}
+function alleMarksNeu(){
+  markObjs.forEach(o => { if(o) map.removeLayer(o); });
+  markObjs = [];
+  marks.forEach((_, j) => zeichneMark(j));
+  marks.forEach((_, j) => markStil(j));
+}
+function markAnlegen(lat, lng, name){
+  marks.push({ lat, lng, name });
+  zeichneMark(marks.length - 1);
+  markSpeichern();
+}
+function markLoeschen(i){
+  marks.splice(i, 1);
+  auswahl = [];
+  alleMarksNeu(); messUpdate(); markSpeichern();
+}
+function markStil(i){
+  if(markObjs[i]) markObjs[i].setStyle({ fillColor: auswahl.includes(i) ? '#22c55e' : '#f59e0b' });
+}
+function wahlToggle(i){
+  const p = auswahl.indexOf(i);
+  if(p >= 0) auswahl.splice(p, 1); else auswahl.push(i);
+  marks.forEach((_, j) => markStil(j));
+  messUpdate();
+}
+function messUpdate(){
+  if(messLinie){ map.removeLayer(messLinie); messLinie = null; }
+  messTips.forEach(t => map.removeLayer(t)); messTips = [];
+  const box = $('messInfo');
+  const leerKnopf = ' <button id="messLeer">Auswahl aufheben</button>';
+  if(!auswahl.length){ box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = '';
+  if(auswahl.length === 1){
+    box.innerHTML = '📌 <b>' + esc(marks[auswahl[0]].name) + '</b> gewählt — weitere Punkte antippen, um Abstände zu messen.' + leerKnopf;
+  } else {
+    const pts = auswahl.map(i => marks[i]);
+    messLinie = L.polyline(pts.map(p => [p.lat, p.lng]),
+      { color:'#22c55e', weight:3, opacity:.85, dashArray:'6 9' }).addTo(map);
+    const zeilen = []; let ges = 0;
+    for(let k = 1; k < pts.length; k++){
+      const d = entf(pts[k - 1], pts[k]); ges += d;
+      zeilen.push(esc(pts[k - 1].name) + ' → ' + esc(pts[k].name) + ': <b>' + Math.round(d) + ' m</b>');
+      const tt = L.tooltip({ permanent:true, direction:'center', className:'segTip' })
+        .setLatLng([(pts[k - 1].lat + pts[k].lat) / 2, (pts[k - 1].lng + pts[k].lng) / 2])
+        .setContent(Math.round(d) + ' m').addTo(map);
+      messTips.push(tt);
+    }
+    box.innerHTML = zeilen.join('<br>') +
+      (pts.length > 2 ? '<br>Gesamt: <b>' + Math.round(ges) + ' m</b>' : '') + leerKnopf;
+  }
+  const b = $('messLeer');
+  if(b) b.onclick = () => { auswahl = []; marks.forEach((_, j) => markStil(j)); messUpdate(); };
+}
+function neuerMarkName(){
+  const nr = marks.length + 1;
+  const name = prompt('Bezeichnung für diesen Punkt:', 'P' + nr);
+  if(name === null) return null;
+  return name.trim() || ('P' + nr);
+}
+$('btnMark').onclick = () => {
+  if(!map.hasLayer(posPunkt)){
+    zeigHinweis('<h2>📌 Noch kein Standort</h2>Der aktuelle Standort ist noch nicht bekannt — bitte warten, bis der Positionspunkt auf der Karte erscheint.');
+    return;
+  }
+  const name = neuerMarkName();
+  if(name === null) return;
+  const ll = posPunkt.getLatLng();
+  markAnlegen(ll.lat, ll.lng, name);
+};
+map.on('contextmenu', e => {   // langes Drücken (bzw. Rechtsklick) auf die Karte
+  const name = neuerMarkName();
+  if(name === null) return;
+  markAnlegen(e.latlng.lat, e.latlng.lng, name);
+});
+/* gespeicherte Punkte wiederherstellen */
+try{
+  const roh = JSON.parse(localStorage.getItem(MARK_KEY) || '[]');
+  if(Array.isArray(roh)) for(const m of roh)
+    if(m && isFinite(+m.lat) && isFinite(+m.lng)) marks.push({ lat:+m.lat, lng:+m.lng, name:String(m.name || 'P') });
+  marks.forEach((_, j) => zeichneMark(j));
+}catch(e){}
 
 /* Bildschirm-Sperre nach Rückkehr in die App erneut anfordern */
 document.addEventListener('visibilitychange', async () => {
