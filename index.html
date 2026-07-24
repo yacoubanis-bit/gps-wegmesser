@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1122">
-<title>SYNIUM — GPS-Wegmesser</title>
+<title>SYNIUM — GPS Wegmessung</title>
 <!-- App-Symbol (SYNIUM-Firmenlogo) für „Zum Startbildschirm hinzufügen" -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
@@ -760,6 +760,66 @@ svg.leaflet-image-layer.leaflet-interactive path {
     border-radius:8px; margin-left:8px; vertical-align:middle;
   }
 
+  /* ===== Menü ===== */
+  #btnMenu{
+    flex:none; width:42px; min-height:42px; margin-left:10px; font-size:18px;
+    background:var(--surface); border:1px solid var(--border); color:var(--fg); border-radius:12px;
+  }
+  #menuPanel{
+    position:fixed; top:64px; right:10px; z-index:3000; display:flex; flex-direction:column; gap:2px;
+    background:#0e1428; border:1px solid var(--border); border-radius:14px; padding:6px;
+    box-shadow:0 16px 40px rgba(0,0,0,.5);
+  }
+  #menuPanel[hidden]{display:none}
+  #menuPanel .mitem{
+    flex:none; min-height:44px; background:transparent; border:none; color:var(--fg);
+    font-size:14px; font-weight:600; text-align:left; padding:0 14px; border-radius:10px;
+  }
+  #menuPanel .mitem:active{background:rgba(99,102,241,.2)}
+
+  /* ===== Dialoge ===== */
+  dialog{
+    background:var(--bg2); color:var(--fg); border:1px solid var(--border); border-radius:16px;
+    padding:0; width:min(560px, calc(100vw - 24px)); max-height:calc(100dvh - 40px);
+  }
+  dialog::backdrop{background:rgba(4,7,14,.65); backdrop-filter:blur(3px)}
+  .dhead{display:flex; align-items:center; gap:10px; padding:13px 16px; font-weight:800; font-size:15px; border-bottom:1px solid var(--border)}
+  .dx{flex:none; margin-left:auto; width:34px; min-height:34px; background:var(--surface); border:1px solid var(--border); color:var(--muted); border-radius:9px; font-size:13px}
+  .dbody{padding:12px 16px; overflow:auto; max-height:min(58dvh, 480px)}
+  .dfoot{display:flex; align-items:center; gap:8px; padding:11px 16px; border-top:1px solid var(--border)}
+  .dfoot button{flex:none; min-height:40px; padding:0 13px; font-size:13px; font-weight:700; background:var(--surface); border:1px solid var(--border); color:var(--fg); border-radius:10px}
+  .dnote{color:var(--muted); font-size:12.5px; margin:0 0 10px; line-height:1.5}
+  #tabT{width:100%; border-collapse:collapse; font-size:13.5px; font-variant-numeric:tabular-nums}
+  #tabT th{cursor:pointer; user-select:none; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); background:rgba(148,163,214,.1); padding:8px 10px; border:1px solid var(--border); white-space:nowrap}
+  #tabT td{padding:7px 10px; border:1px solid var(--border)}
+  #tabT td.num{text-align:right; font-weight:700}
+  #tabT tr.ges td{background:rgba(148,163,214,.08); font-weight:800}
+  .dbRow{display:flex; align-items:center; gap:10px; padding:9px 11px; border:1px solid var(--border); border-radius:12px; margin-bottom:8px; font-size:13.5px; line-height:1.4}
+  .dbRow small{color:var(--muted)}
+  .dbRow button{flex:none; min-height:36px; padding:0 12px; font-size:12.5px; font-weight:700; background:var(--surface); border:1px solid var(--border); color:var(--fg); border-radius:9px}
+
+  /* ===== PDF-Druck der Abstands-Tabelle (einheitliche SYNIUM-PDF-Einstellungen) ===== */
+  #printTbl{display:none}
+  @media print{
+    @page{
+      size:A4; margin:8mm 0 11mm 0;
+      @bottom-right{
+        content:"Seite " counter(page) " von " counter(pages);
+        font-size:9px; color:#555; margin-right:12mm; vertical-align:bottom; margin-bottom:7mm;
+      }
+    }
+    body{display:block; background:#fff; overflow:visible; height:auto}
+    body > *:not(#printTbl){display:none !important}
+    #printTbl{display:block; color:#111; padding:5mm 10mm 4mm 15mm; font-family:system-ui, sans-serif}
+    #printTbl .pLogo{height:62px; display:block; margin-bottom:8px}
+    #printTbl h1{font-size:18px; margin:0 0 3px; border-bottom:2px solid #222; padding-bottom:8px}
+    #printTbl .pMeta{font-size:11px; color:#333; line-height:1.6; margin:6px 0 12px}
+    #printTbl table{width:100%; border-collapse:collapse; table-layout:fixed; font-size:11px}
+    #printTbl th, #printTbl td{border:1px solid #cfd4dc; padding:4px 8px; text-align:left; overflow-wrap:break-word}
+    #printTbl th{background:#eef1f6; -webkit-print-color-adjust:exact; print-color-adjust:exact; font-size:10px; text-transform:uppercase}
+    #printTbl tr.ges td{background:#f5f6f8; -webkit-print-color-adjust:exact; print-color-adjust:exact; font-weight:800}
+  }
+
   /* Hinweis-Overlay (kein GPS / kein sicherer Kontext) */
   #hinweis{
     position:fixed; inset:0; z-index:5000; display:none; align-items:center; justify-content:center;
@@ -842,11 +902,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
   @keyframes drift1{to{transform:translate(9vmax,7vmax) scale(1.12)}}
   @keyframes drift2{to{transform:translate(-8vmax,-6vmax) scale(1.08)}}
   @keyframes gridMove{to{background-position:0 46px, 46px 0}}
-  #hdrLogo{height:34px; display:block; flex:none}
+  #hdrLogo{height:46px; display:block; flex:none}
   /* 5-Zoll-Smartphones (schmale Displays) */
   @media (max-width:380px){
     header h1{font-size:15px}
-    #hdrLogo{height:28px}
+    #hdrLogo{height:38px}
     #dist{font-size:42px}
     #distEinheit{font-size:16px}
     .chip{font-size:10.5px; padding:4px 9px}
@@ -879,14 +939,20 @@ svg.leaflet-image-layer.leaflet-interactive path {
       onerror="this.replaceWith(Object.assign(document.createElement('b'),{textContent:'SYNIUM',style:'font-size:42px'}))"></div>
   </div>
   <div class="bar"><i></i></div>
-  <div class="tag">GPS-Wegmesser</div>
+  <div class="tag">GPS Wegmessung</div>
   <div class="skip">Tippen zum &Uuml;berspringen</div>
 </div>
 <header>
   <img id="hdrLogo" alt="" onerror="this.style.display='none'">
-  <h1>GPS-Wegmesser<small>SYNIUM</small></h1>
+  <h1>GPS Wegmessung</h1>
   <div id="gpsState">GPS: <b class="bad" id="gpsTxt">aus</b><br><span id="accTxt">Genauigkeit: —</span></div>
+  <button id="btnMenu" title="Menü">☰</button>
 </header>
+
+<div id="menuPanel" hidden>
+  <button class="mitem" id="btnTabelle">📏 Abstands-Tabelle</button>
+  <button class="mitem" id="btnDb">📂 Gespeicherte Messungen</button>
+</div>
 
 <div id="panel">
   <div id="distWrap"><span id="dist">0</span><span id="distEinheit">m</span></div>
@@ -910,6 +976,36 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </div>
 
 <div id="hinweis"><div class="box" id="hinweisBox"></div></div>
+
+<!-- Abstands-Tabelle (sortierbar, mit Excel/PDF-Export und Speichern in der Datenbank) -->
+<dialog id="tabDlg">
+  <div class="dhead">📏 Abstands-Tabelle<button class="dx" id="tabX">✕</button></div>
+  <div class="dbody">
+    <p class="dnote" id="tabQuelle"></p>
+    <div style="overflow-x:auto"><table id="tabT"><thead></thead><tbody></tbody></table></div>
+  </div>
+  <div class="dfoot">
+    <button id="btnTabSave">💾 Speichern</button>
+    <button id="btnTabExcel">📊 Excel</button>
+    <button id="btnTabPdf">📄 PDF</button>
+    <span style="flex:1"></span>
+    <button id="tabOk">OK</button>
+  </div>
+</dialog>
+
+<!-- Messungs-Datenbank (im Gerät gespeichert, per JSON-Datei sicherbar) -->
+<dialog id="dbDlg">
+  <div class="dhead">📂 Gespeicherte Messungen<button class="dx" id="dbX">✕</button></div>
+  <div class="dbody" id="dbBody"></div>
+  <div class="dfoot">
+    <button id="btnDbExport">⬇ Sicherung (JSON)</button>
+    <button id="btnDbImport">⬆ Sicherung laden</button>
+    <span style="flex:1"></span>
+    <button id="dbOk">OK</button>
+  </div>
+</dialog>
+<input type="file" id="dbFile" accept=".json" hidden>
+<div id="printTbl"></div>
 
 <script>
 /* @preserve
@@ -1257,6 +1353,218 @@ function zeigHinweis(html){
     'onclick="document.getElementById(\'hinweis\').style.display=\'none\'">OK</button></div>';
   $('hinweis').style.display = 'flex';
 }
+/* ================= Excel-Schreiber (.xlsx ohne Bibliotheken — wie in den SYNIUM-Apps) ================= */
+function crc32(u8){
+  let t = crc32.t;
+  if(!t){
+    t = crc32.t = new Int32Array(256);
+    for(let n = 0; n < 256; n++){ let c = n; for(let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c; }
+  }
+  let c = -1;
+  for(let i = 0; i < u8.length; i++) c = t[(c ^ u8[i]) & 255] ^ (c >>> 8);
+  return (c ^ -1) >>> 0;
+}
+function zipStored(dateien){
+  const te = new TextEncoder();
+  const teile = [], zentral = [];
+  let off = 0;
+  for(const [name, inhalt] of dateien){
+    const nb = te.encode(name), db = te.encode(inhalt);
+    const crc = crc32(db);
+    const lokal = new Uint8Array(30 + nb.length);
+    const dv = new DataView(lokal.buffer);
+    dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true);
+    dv.setUint32(14, crc, true); dv.setUint32(18, db.length, true); dv.setUint32(22, db.length, true);
+    dv.setUint16(26, nb.length, true);
+    lokal.set(nb, 30);
+    teile.push(lokal, db);
+    const z = new Uint8Array(46 + nb.length);
+    const zv = new DataView(z.buffer);
+    zv.setUint32(0, 0x02014b50, true); zv.setUint16(4, 20, true); zv.setUint16(6, 20, true);
+    zv.setUint32(16, crc, true); zv.setUint32(20, db.length, true); zv.setUint32(24, db.length, true);
+    zv.setUint16(28, nb.length, true); zv.setUint32(42, off, true);
+    z.set(nb, 46);
+    zentral.push(z);
+    off += 30 + nb.length + db.length;
+  }
+  const gesamt = zentral.reduce((a, b) => a + b.length, 0);
+  const ende = new Uint8Array(22);
+  const ev = new DataView(ende.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, dateien.length, true); ev.setUint16(10, dateien.length, true);
+  ev.setUint32(12, gesamt, true); ev.setUint32(16, off, true);
+  return new Blob([...teile, ...zentral, ende], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+const xEsc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function xlsxBlob(zeilen, blattName){
+  const rowsXml = zeilen.map((z, ri) => '<row r="' + (ri + 1) + '">' +
+    z.map((v, ci) => '<c r="' + String.fromCharCode(65 + ci) + (ri + 1) + '" t="inlineStr"><is><t xml:space="preserve">' + xEsc(v) + '</t></is></c>').join('') +
+    '</row>').join('');
+  const sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + rowsXml + '</sheetData></worksheet>';
+  const wb = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    '<sheets><sheet name="' + xEsc(blattName) + '" sheetId="1" r:id="rId1"/></sheets></workbook>';
+  const wbRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>';
+  const rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+  const ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>';
+  return zipStored([
+    ['[Content_Types].xml', ct],
+    ['_rels/.rels', rels],
+    ['xl/workbook.xml', wb],
+    ['xl/_rels/workbook.xml.rels', wbRels],
+    ['xl/worksheets/sheet1.xml', sheet]
+  ]);
+}
+function ladeBlob(blob, name){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function zeitStempel(){
+  const n = new Date(), p = x => String(x).padStart(2, '0');
+  return n.getFullYear() + '-' + p(n.getMonth() + 1) + '-' + p(n.getDate()) + '_' + p(n.getHours()) + 'h' + p(n.getMinutes()) + 'm' + p(n.getSeconds());
+}
+
+/* ================= Menü ================= */
+$('btnMenu').onclick = e => { e.stopPropagation(); $('menuPanel').hidden = !$('menuPanel').hidden; };
+document.addEventListener('click', e => {
+  if(!e.target.closest('#menuPanel') && !e.target.closest('#btnMenu')) $('menuPanel').hidden = true;
+});
+
+/* ================= Abstands-Tabelle (sortierbar) =================
+   Grundlage: die gewählten Punkte in Antipp-Reihenfolge — ohne Auswahl alle
+   markierten Punkte in der Reihenfolge ihrer Anlage. */
+let tabSort = { key:'nr', dir:1 };
+function tabDaten(){
+  let kette, quelle;
+  if(auswahl.length >= 2){ kette = auswahl.map(i => marks[i]); quelle = 'gewählte Punkte (Antipp-Reihenfolge)'; }
+  else { kette = marks.slice(); quelle = 'alle markierten Punkte (Reihenfolge der Anlage)'; }
+  const rows = [];
+  for(let k = 1; k < kette.length; k++)
+    rows.push({ nr:k, von:kette[k - 1].name, nach:kette[k].name, m:Math.round(entf(kette[k - 1], kette[k])) });
+  return { rows, gesamt: rows.reduce((a, r) => a + r.m, 0), quelle };
+}
+function renderTab(){
+  const d = tabDaten();
+  $('tabQuelle').textContent = d.rows.length
+    ? 'Grundlage: ' + d.quelle + ' — Spaltentitel antippen zum Sortieren.'
+    : 'Mindestens zwei markierte Punkte nötig — Punkte mit 📌 oder langem Druck auf die Karte anlegen.';
+  const cols = [['nr','Nr.'], ['von','Von'], ['nach','Nach'], ['m','Abstand (m)']];
+  $('tabT').querySelector('thead').innerHTML = '<tr>' + cols.map(([k, t]) =>
+    '<th data-k="' + k + '">' + t + (tabSort.key === k ? (tabSort.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') + '</tr>';
+  const rows = d.rows.slice().sort((a, b) => {
+    const va = a[tabSort.key], vb = b[tabSort.key];
+    return (typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb), 'de')) * tabSort.dir;
+  });
+  $('tabT').querySelector('tbody').innerHTML =
+    rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td class="num">' + r.m + '</td></tr>').join('') +
+    (d.rows.length ? '<tr class="ges"><td></td><td></td><td>Gesamt</td><td class="num">' + d.gesamt + '</td></tr>' : '');
+  $('tabT').querySelectorAll('th').forEach(th => th.onclick = () => {
+    const k = th.dataset.k;
+    if(tabSort.key === k) tabSort.dir *= -1; else tabSort = { key:k, dir:1 };
+    renderTab();
+  });
+}
+$('btnTabelle').onclick = () => { $('menuPanel').hidden = true; tabSort = { key:'nr', dir:1 }; renderTab(); $('tabDlg').showModal(); };
+$('tabX').onclick = $('tabOk').onclick = () => $('tabDlg').close();
+
+/* Excel-Export der Tabelle */
+$('btnTabExcel').onclick = () => {
+  const d = tabDaten();
+  if(!d.rows.length){ alert('Keine Abstände vorhanden — bitte zuerst Punkte markieren.'); return; }
+  const zeilen = [['Nr.', 'Von', 'Nach', 'Abstand (m)'],
+    ...d.rows.map(r => [r.nr, r.von, r.nach, r.m]),
+    ['', '', 'Gesamt', d.gesamt]];
+  ladeBlob(xlsxBlob(zeilen, 'Abstände'), 'GPS_Wegmessung_Abstaende_' + zeitStempel() + '.xlsx');
+};
+/* PDF-Export der Tabelle (über den Druckdialog, einheitliches SYNIUM-Layout) */
+$('btnTabPdf').onclick = () => {
+  const d = tabDaten();
+  if(!d.rows.length){ alert('Keine Abstände vorhanden — bitte zuerst Punkte markieren.'); return; }
+  const now = new Date();
+  $('printTbl').innerHTML =
+    '<img class="pLogo" src="' + $('splashLogo').src + '">' +
+    '<h1>Abstands-Tabelle — GPS Wegmessung</h1>' +
+    '<div class="pMeta">Erstellt am: <b>' + now.toLocaleString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + ' Uhr</b>' +
+    '<br>Prüf Tool: SYNIUM GPS Wegmessung &nbsp;·&nbsp; Grundlage: ' + esc(d.quelle) + '</div>' +
+    '<table><thead><tr><th style="width:10%">Nr.</th><th>Von</th><th>Nach</th><th style="width:20%">Abstand (m)</th></tr></thead><tbody>' +
+    d.rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td>' + r.m + '</td></tr>').join('') +
+    '<tr class="ges"><td></td><td></td><td>Gesamt</td><td>' + d.gesamt + '</td></tr>' +
+    '</tbody></table>';
+  $('tabDlg').close();
+  setTimeout(() => window.print(), 150);
+};
+
+/* ================= Messungs-Datenbank (im Gerät, per JSON-Datei sicherbar) ================= */
+const DB_KEY = 'synium_gps_mess_db_v1';
+function dbLese(){ try{ const d = JSON.parse(localStorage.getItem(DB_KEY) || '[]'); return Array.isArray(d) ? d : []; }catch(e){ return []; } }
+function dbSchreibe(d){ try{ localStorage.setItem(DB_KEY, JSON.stringify(d)); }catch(e){} }
+$('btnTabSave').onclick = () => {
+  const d = tabDaten();
+  if(!d.rows.length){ alert('Keine Abstände zum Speichern vorhanden.'); return; }
+  const name = prompt('Name für diese Messung:', 'Messung ' + new Date().toLocaleDateString('de-DE'));
+  if(name === null) return;
+  const db = dbLese();
+  db.push({ id:String(Date.now()), name:(name.trim() || 'Messung'), zeit:new Date().toISOString(),
+    marks: marks.map(m => ({ ...m })), rows: d.rows, gesamt: d.gesamt, quelle: d.quelle });
+  dbSchreibe(db);
+  alert('Messung „' + (name.trim() || 'Messung') + '" gespeichert — ' + d.rows.length + ' Abstände, gesamt ' + d.gesamt + ' m.');
+};
+function renderDb(){
+  const db = dbLese();
+  $('dbBody').innerHTML = db.length
+    ? db.slice().reverse().map(e =>
+        '<div class="dbRow"><div><b>' + esc(e.name) + '</b><br><small>' +
+        new Date(e.zeit).toLocaleString('de-DE') + ' · ' + e.rows.length + ' Abstände · gesamt ' + e.gesamt + ' m</small></div>' +
+        '<span style="flex:1"></span>' +
+        '<button data-lade="' + e.id + '">Laden</button><button data-del="' + e.id + '">🗑</button></div>').join('')
+    : '<p class="dnote" style="margin:0">Noch keine gespeicherten Messungen. In der Abstands-Tabelle über „💾 Speichern" ablegen.</p>';
+  $('dbBody').querySelectorAll('button[data-lade]').forEach(b => b.onclick = () => {
+    const e = dbLese().find(x => x.id === b.dataset.lade); if(!e) return;
+    marks = (e.marks || []).map(m => ({ ...m })); auswahl = [];
+    alleMarksNeu(); messUpdate(); markSpeichern();
+    if(marks.length) map.fitBounds(L.latLngBounds(marks.map(m => [m.lat, m.lng])).pad(0.3));
+    $('dbDlg').close();
+  });
+  $('dbBody').querySelectorAll('button[data-del]').forEach(b => b.onclick = () => {
+    const db2 = dbLese(), e = db2.find(x => x.id === b.dataset.del);
+    if(!confirm('Messung „' + (e ? e.name : '?') + '" wirklich löschen?')) return;
+    dbSchreibe(db2.filter(x => x.id !== b.dataset.del)); renderDb();
+  });
+}
+$('btnDb').onclick = () => { $('menuPanel').hidden = true; renderDb(); $('dbDlg').showModal(); };
+$('dbX').onclick = $('dbOk').onclick = () => $('dbDlg').close();
+$('btnDbExport').onclick = () => {
+  ladeBlob(new Blob([JSON.stringify({ app:'SYNIUM-GPS-DB', version:1, exportiert:new Date().toISOString(), messungen: dbLese() })],
+    { type:'application/json' }), 'GPS_Wegmessung_Datenbank_' + zeitStempel() + '.json');
+};
+$('btnDbImport').onclick = () => $('dbFile').click();
+$('dbFile').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if(!f) return;
+  try{
+    const obj = JSON.parse(await f.text());
+    const rein = (obj && Array.isArray(obj.messungen)) ? obj.messungen : (Array.isArray(obj) ? obj : null);
+    if(!rein) throw new Error('Kein gültiges Datenbank-Format.');
+    const db = dbLese(), ids = new Set(db.map(x => x.id));
+    let neu = 0;
+    for(const m of rein) if(m && m.id && Array.isArray(m.rows) && !ids.has(m.id)){ db.push(m); neu++; }
+    dbSchreibe(db); renderDb();
+    alert(neu + ' Messung(en) übernommen.');
+  }catch(err){ alert('Import fehlgeschlagen: ' + (err.message || err)); }
+};
+
 anzeigen();
 starteOrtung(true);   // Standort sofort beim Öffnen anzeigen — die Messung startet erst mit ▶ Start
 </script>
