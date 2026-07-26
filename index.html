@@ -1023,6 +1023,14 @@ svg.leaflet-image-layer.leaflet-interactive path {
 <dialog id="tabDlg">
   <div class="dhead">📏 Abstands-Tabelle<button class="dx" id="tabX">✕</button></div>
   <div class="dbody">
+    <label class="dfeld">Tabelle
+      <div style="display:flex; gap:6px; margin-top:5px">
+        <select id="tabWahl" style="flex:1; min-width:0; margin-top:0"></select>
+        <button id="tabNeu" title="Neue Tabelle anlegen" style="flex:none; min-height:38px; padding:0 11px; background:var(--surface); border:1px solid var(--border); border-radius:9px; font-size:14px; color:var(--fg)">➕</button>
+        <button id="tabRen" title="Tabelle umbenennen" style="flex:none; min-height:38px; padding:0 11px; background:var(--surface); border:1px solid var(--border); border-radius:9px; font-size:14px; color:var(--fg)">✏</button>
+        <button id="tabDel" title="Tabelle löschen" style="flex:none; min-height:38px; padding:0 11px; background:var(--surface); border:1px solid var(--border); border-radius:9px; font-size:14px; color:var(--fg)">🗑</button>
+      </div>
+    </label>
     <p class="dnote" id="tabQuelle"></p>
     <div style="overflow-x:auto"><table id="tabT"><thead></thead><tbody></tbody></table></div>
   </div>
@@ -1106,6 +1114,17 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <div class="dhead">👥 Userdaten<button class="dx" id="usersX">✕</button></div>
   <div class="dbody" id="usersBody"></div>
   <div class="dfoot"><span style="flex:1"></span><button id="usersOk">OK</button></div>
+</dialog>
+
+<!-- Auswahl: In welche Abstandstabelle speichern? -->
+<dialog id="twDlg">
+  <div class="dhead">➕ In welche Tabelle speichern?<button class="dx" id="twX">✕</button></div>
+  <div class="dbody" id="twBody"></div>
+  <div class="dfoot">
+    <button id="twNeu">➕ Neue Tabelle …</button>
+    <span style="flex:1"></span>
+    <button id="twOk">Abbrechen</button>
+  </div>
 </dialog>
 
 <!-- Zentrale Datenbank: privates GitHub-Repository als gemeinsamer Speicher -->
@@ -1506,10 +1525,12 @@ function messUpdate(){
     box.innerHTML = zeilen.join('<br>') +
       (pts.length > 2 ? '<br>Gesamt: <b>' + Math.round(ges) + ' m</b>' : '') +
       (alleWeg ? '' : '<br><small style="color:var(--faint)">Luftlinie = Punkt liegt nicht an der aufgezeichneten Spur</small>') +
-      leerKnopf;
+      ' <button id="messTab">➕ In Tabelle</button>' + leerKnopf;
   }
   const b = $('messLeer');
   if(b) b.onclick = () => { auswahl = []; marks.forEach((_, j) => markStil(j)); messUpdate(); };
+  const bt = $('messTab');
+  if(bt) bt.onclick = () => auswahlInTabelle();
 }
 function neuerMarkName(){
   const nr = marks.length + 1;
@@ -1686,58 +1707,175 @@ function tabDaten(){
   const rows = [];
   for(let k = 1; k < kette.length; k++){
     const a = abstand(kette[k - 1], kette[k]);
-    rows.push({ nr:k, von:kette[k - 1].name, nach:kette[k].name, m:Math.round(a.m), art: a.weg ? 'Weg' : 'Luftlinie' });
+    rows.push({ nr:k, von:kette[k - 1].name, nach:kette[k].name, m:Math.round(a.m) });
   }
   return { rows, gesamt: rows.reduce((a, r) => a + r.m, 0), quelle };
 }
+/* ===== Mehrere benannte Abstandstabellen =====
+   Gewählte Punkt-zu-Punkt-Messungen lassen sich in beliebig viele, frei benennbare
+   Tabellen speichern. Umbenennen/Löschen nur durch den Ersteller oder den Master-Admin. */
+const TBL_KEY = 'synium_gps_tabellen_v1';
+function tblLese(){ try{ const d = JSON.parse(localStorage.getItem(TBL_KEY) || '[]'); return Array.isArray(d) ? d : []; }catch(e){ return []; } }
+function tblSchreibeOhneSync(d){ try{ localStorage.setItem(TBL_KEY, JSON.stringify(d)); }catch(e){} }
+function tblSchreibe(d){ tblSchreibeOhneSync(d); cloudPlan(); }
+function darfTabelle(t){ return sessRole() === 'master' || !t.owner || String(t.owner).toLowerCase() === sessU().toLowerCase(); }
+function tblNeuAnlegen(){
+  const name = prompt('Name der neuen Abstandstabelle:', 'Tabelle ' + (tblLese().filter(t => !t.geloescht).length + 1));
+  if(name === null) return null;
+  const t = { id:'t' + Date.now(), name:(name.trim() || 'Tabelle'), eintraege:[], owner:sessU(), updatedAt:Date.now(), geloescht:false };
+  const alle = tblLese(); alle.push(t); tblSchreibe(alle);
+  return t;
+}
+/* Zeilen der aktuellen Punkt-Auswahl (aufeinanderfolgende Paare) */
+function auswahlZeilen(){
+  const pts = auswahl.map(i => marks[i]), z = [];
+  for(let k = 1; k < pts.length; k++){
+    const a = abstand(pts[k - 1], pts[k]);
+    z.push({ id:'e' + Date.now() + '_' + k, von:pts[k - 1].name, nach:pts[k].name, m:Math.round(a.m),
+      zeit:new Date().toISOString(), owner:sessU() });
+  }
+  return z;
+}
+/* Auswahl-Dialog: in welche Tabelle speichern? */
+let twCb = null;
+function renderTw(){
+  const alle = tblLese().filter(t => !t.geloescht);
+  $('twBody').innerHTML = alle.length
+    ? alle.map(t => '<div class="pRow" style="cursor:pointer" data-tw="' + t.id + '"><div><b>' + esc(t.name) + '</b><br><small>' +
+        t.eintraege.length + ' Abstände · 👤 ' + esc(t.owner ? userDisp(t.owner) : '—') + '</small></div></div>').join('')
+    : '<p class="dnote" style="margin:0">Noch keine Tabelle vorhanden — über „➕ Neue Tabelle …" anlegen.</p>';
+  $('twBody').querySelectorAll('[data-tw]').forEach(el => el.onclick = () => {
+    const cb = twCb; twCb = null; $('twDlg').close();
+    if(cb) cb(el.dataset.tw);
+  });
+}
+function waehleTabelle(cb){ twCb = cb; renderTw(); $('twDlg').showModal(); }
+$('twNeu').onclick = () => {
+  const t = tblNeuAnlegen();
+  if(!t) return;
+  const cb = twCb; twCb = null; $('twDlg').close();
+  if(cb) cb(t.id);
+};
+$('twX').onclick = $('twOk').onclick = () => { twCb = null; $('twDlg').close(); };
+/* Aktuelle Punkt-Auswahl in eine Tabelle speichern */
+function auswahlInTabelle(){
+  const zeilen = auswahlZeilen();
+  if(!zeilen.length){ alert('Bitte mindestens zwei Punkte auf der Karte wählen.'); return; }
+  waehleTabelle(id => {
+    const alle = tblLese(), t = alle.find(x => x.id === id && !x.geloescht);
+    if(!t) return;
+    t.eintraege.push(...zeilen);
+    t.updatedAt = Date.now();
+    tblSchreibe(alle);
+    alert(zeilen.length + ' Abstand/Abstände in Tabelle „' + t.name + '" gespeichert.');
+  });
+}
+
+/* ===== Anzeige: Live-Ansicht (aktuelle Punkte) oder gespeicherte Tabelle ===== */
+let tabAktiv = '';   // '' = Live-Ansicht, sonst Tabellen-Id
+function tabAnsicht(){
+  if(tabAktiv){
+    const t = tblLese().find(x => x.id === tabAktiv && !x.geloescht);
+    if(t){
+      const rows = t.eintraege.map((e, i) => ({ nr:i + 1, von:e.von, nach:e.nach, m:e.m, eid:e.id }));
+      return { rows, gesamt: rows.reduce((a, r) => a + r.m, 0), quelle:'Tabelle „' + t.name + '"', tabelle:t };
+    }
+    tabAktiv = '';
+  }
+  return { ...tabDaten(), tabelle:null };
+}
 function renderTab(){
-  const d = tabDaten();
+  const alleT = tblLese().filter(t => !t.geloescht);
+  if(tabAktiv && !alleT.some(t => t.id === tabAktiv)) tabAktiv = '';
+  $('tabWahl').innerHTML = '<option value=""' + (tabAktiv ? '' : ' selected') + '>Aktuelle Punkte (live)</option>' +
+    alleT.map(t => '<option value="' + esc(t.id) + '"' + (t.id === tabAktiv ? ' selected' : '') + '>' + esc(t.name) + ' (' + t.eintraege.length + ')</option>').join('');
+  const d = tabAnsicht();
+  const darfT = d.tabelle ? darfTabelle(d.tabelle) : false;
+  $('tabRen').style.display = (d.tabelle && darfT) ? '' : 'none';
+  $('tabDel').style.display = (d.tabelle && darfT) ? '' : 'none';
+  $('btnTabSave').style.display = d.tabelle ? 'none' : '';
   $('tabQuelle').textContent = d.rows.length
     ? 'Grundlage: ' + d.quelle + ' — Spaltentitel antippen zum Sortieren.'
-    : 'Mindestens zwei markierte Punkte nötig — Punkte mit 📌 oder langem Druck auf die Karte anlegen.';
-  const cols = [['nr','Nr.'], ['von','Von'], ['nach','Nach'], ['m','Abstand (m)'], ['art','Art']];
+    : (d.tabelle ? 'Diese Tabelle ist noch leer — Punkte auf der Karte wählen und über „➕ In Tabelle" speichern.'
+       : 'Mindestens zwei markierte Punkte nötig — Punkte mit 📌 oder langem Druck auf die Karte anlegen.');
+  const cols = [['nr','Nr.'], ['von','Von'], ['nach','Nach'], ['m','Abstand (m)']];
   $('tabT').querySelector('thead').innerHTML = '<tr>' + cols.map(([k, t]) =>
-    '<th data-k="' + k + '">' + t + (tabSort.key === k ? (tabSort.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') + '</tr>';
+    '<th data-k="' + k + '">' + t + (tabSort.key === k ? (tabSort.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') +
+    (d.tabelle && darfT ? '<th></th>' : '') + '</tr>';
   const rows = d.rows.slice().sort((a, b) => {
     const va = a[tabSort.key], vb = b[tabSort.key];
     return (typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb), 'de')) * tabSort.dir;
   });
   $('tabT').querySelector('tbody').innerHTML =
-    rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td class="num">' + r.m + '</td><td>' + r.art + '</td></tr>').join('') +
-    (d.rows.length ? '<tr class="ges"><td></td><td></td><td>Gesamt</td><td class="num">' + d.gesamt + '</td><td></td></tr>' : '');
-  $('tabT').querySelectorAll('th').forEach(th => th.onclick = () => {
+    rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td class="num">' + r.m + '</td>' +
+      (d.tabelle && darfT ? '<td style="text-align:center"><button data-edel="' + esc(r.eid) + '" style="flex:none; min-height:26px; padding:0 8px; background:var(--surface); border:1px solid var(--border); border-radius:7px; font-size:12px; color:var(--muted)">🗑</button></td>' : '') +
+      '</tr>').join('') +
+    (d.rows.length ? '<tr class="ges"><td></td><td></td><td>Gesamt</td><td class="num">' + d.gesamt + '</td>' + (d.tabelle && darfT ? '<td></td>' : '') + '</tr>' : '');
+  $('tabT').querySelectorAll('th[data-k]').forEach(th => th.onclick = () => {
     const k = th.dataset.k;
     if(tabSort.key === k) tabSort.dir *= -1; else tabSort = { key:k, dir:1 };
     renderTab();
   });
+  $('tabT').querySelectorAll('button[data-edel]').forEach(b => b.onclick = () => {
+    if(!confirm('Diesen Abstand aus der Tabelle löschen?')) return;
+    const alle = tblLese(), t = alle.find(x => x.id === tabAktiv);
+    if(!t || !darfTabelle(t)) return;
+    t.eintraege = t.eintraege.filter(e => e.id !== b.dataset.edel);
+    t.updatedAt = Date.now();
+    tblSchreibe(alle); renderTab();
+  });
 }
-$('btnTabelle').onclick = () => { $('menuPanel').hidden = true; tabSort = { key:'nr', dir:1 }; renderTab(); $('tabDlg').showModal(); };
+$('tabWahl').onchange = () => { tabAktiv = $('tabWahl').value; tabSort = { key:'nr', dir:1 }; renderTab(); };
+$('tabNeu').onclick = () => { const t = tblNeuAnlegen(); if(t){ tabAktiv = t.id; renderTab(); } };
+$('tabRen').onclick = () => {
+  const alle = tblLese(), t = alle.find(x => x.id === tabAktiv);
+  if(!t || !darfTabelle(t)) return;
+  const neu = prompt('Neuer Name der Tabelle:', t.name);
+  if(neu === null || !neu.trim()) return;
+  t.name = neu.trim(); t.updatedAt = Date.now();
+  tblSchreibe(alle); renderTab();
+};
+$('tabDel').onclick = () => {
+  const alle = tblLese(), t = alle.find(x => x.id === tabAktiv);
+  if(!t || !darfTabelle(t)) return;
+  if(!confirm('Tabelle „' + t.name + '" mit ' + t.eintraege.length + ' Abständen wirklich löschen?')) return;
+  t.geloescht = true; t.updatedAt = Date.now();
+  tblSchreibe(alle); tabAktiv = ''; renderTab();
+};
+$('btnTabelle').onclick = () => {
+  $('menuPanel').hidden = true;
+  tabSort = { key:'nr', dir:1 };
+  if(auswahl.length >= 2) tabAktiv = '';   // aktive Punkt-Auswahl direkt anzeigen
+  renderTab();
+  $('tabDlg').showModal();
+};
 $('tabX').onclick = $('tabOk').onclick = () => $('tabDlg').close();
 
 /* Excel-Export der Tabelle */
 $('btnTabExcel').onclick = () => {
-  const d = tabDaten();
+  const d = tabAnsicht();
   if(!d.rows.length){ alert('Keine Abstände vorhanden — bitte zuerst Punkte markieren.'); return; }
-  const zeilen = [['Nr.', 'Von', 'Nach', 'Abstand (m)', 'Art'],
-    ...d.rows.map(r => [r.nr, r.von, r.nach, r.m, r.art]),
-    ['', '', 'Gesamt', d.gesamt, '']];
-  ladeBlob(xlsxBlob(zeilen, 'Abstände'), 'LST_Abstandmessung_' + zeitStempel() + '.xlsx');
+  const zeilen = [['Nr.', 'Von', 'Nach', 'Abstand (m)'],
+    ...d.rows.map(r => [r.nr, r.von, r.nach, r.m]),
+    ['', '', 'Gesamt', d.gesamt]];
+  const zusatz = d.tabelle ? '_' + d.tabelle.name.replace(/[^A-Za-z0-9äöüÄÖÜß\-_ ]/g, '').trim().replace(/\s+/g, '_') : '';
+  ladeBlob(xlsxBlob(zeilen, 'Abstände'), 'LST_Abstandmessung' + zusatz + '_' + zeitStempel() + '.xlsx');
 };
 /* PDF-Export der Tabelle (über den Druckdialog, einheitliches SYNIUM-Layout) */
 $('btnTabPdf').onclick = () => {
-  const d = tabDaten();
+  const d = tabAnsicht();
   if(!d.rows.length){ alert('Keine Abstände vorhanden — bitte zuerst Punkte markieren.'); return; }
   const now = new Date();
   $('printTbl').innerHTML =
     '<img class="pLogo" src="' + $('splashLogo').src + '">' +
-    '<h1>Abstands-Tabelle — LST Abstandmessung</h1>' +
+    '<h1>' + (d.tabelle ? 'Abstandstabelle „' + esc(d.tabelle.name) + '"' : 'Abstands-Tabelle') + ' — LST Abstandmessung</h1>' +
     '<div class="pMeta">Projekt: <b>' + esc(aktP().name || '—') + '</b> &nbsp;·&nbsp; Betriebsstelle: <b>' + esc(aktP().betriebsstelle || '—') + '</b>' +
     '<br>Erstellt am: <b>' + now.toLocaleString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + ' Uhr</b>' +
     ' &nbsp;·&nbsp; von: <b>' + esc(loggedIn() ? userDisp(sessU()) : '—') + '</b>' +
     '<br>Prüf Tool: SYNIUM LST Abstandmessung &nbsp;·&nbsp; Grundlage: ' + esc(d.quelle) + '</div>' +
-    '<table><thead><tr><th style="width:8%">Nr.</th><th>Von</th><th>Nach</th><th style="width:17%">Abstand (m)</th><th style="width:14%">Art</th></tr></thead><tbody>' +
-    d.rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td>' + r.m + '</td><td>' + r.art + '</td></tr>').join('') +
-    '<tr class="ges"><td></td><td></td><td>Gesamt</td><td>' + d.gesamt + '</td><td></td></tr>' +
+    '<table><thead><tr><th style="width:10%">Nr.</th><th>Von</th><th>Nach</th><th style="width:20%">Abstand (m)</th></tr></thead><tbody>' +
+    d.rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td>' + r.m + '</td></tr>').join('') +
+    '<tr class="ges"><td></td><td></td><td>Gesamt</td><td>' + d.gesamt + '</td></tr>' +
     '</tbody></table>';
   $('tabDlg').close();
   setTimeout(() => window.print(), 150);
@@ -2117,12 +2255,14 @@ async function cloudSync(leise){
     B.projekte = mischeListe(f.projekte, B.projekte, 'id');
     const mess = mischeListe(f.messungen, dbLese(), 'id');
     dbSchreibeOhneSync(mess);
+    const tabs = mischeListe(f.tabellen, tblLese(), 'id');
+    tblSchreibeOhneSync(tabs);
     bSpeicherOhneSync();
-    const lokalStand = JSON.stringify({ users:B.users, projekte:B.projekte, messungen:mess });
-    const fernStand = fern.daten ? JSON.stringify({ users:f.users || [], projekte:f.projekte || [], messungen:f.messungen || [] }) : '';
+    const lokalStand = JSON.stringify({ users:B.users, projekte:B.projekte, messungen:mess, tabellen:tabs });
+    const fernStand = fern.daten ? JSON.stringify({ users:f.users || [], projekte:f.projekte || [], messungen:f.messungen || [], tabellen:f.tabellen || [] }) : '';
     if(lokalStand !== fernStand)
       await cloudSchreibe({ app:'SYNIUM-LST-DB', version:1, stand:new Date().toISOString(),
-        users:B.users, projekte:B.projekte, messungen:mess }, fern.sha);
+        users:B.users, projekte:B.projekte, messungen:mess, tabellen:tabs }, fern.sha);
     applyUserUi();
     cloudStatusSetzen('✅ Verbunden — letzter Abgleich ' + new Date().toLocaleTimeString('de-DE') + ' Uhr');
     return true;
