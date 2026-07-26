@@ -748,7 +748,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   #btnStart{background:linear-gradient(135deg, #22c55e, #059669); box-shadow:0 6px 18px rgba(34,197,94,.35)}
   #btnStart.laeuft{background:linear-gradient(135deg, #f59e0b, #d97706); box-shadow:0 6px 18px rgba(245,158,11,.3)}
   #btnReset{flex:0 0 26%; background:var(--surface); border:1px solid var(--border); color:var(--muted); font-size:12.5px}
-  #btnFolgen, #btnMark{
+  #btnFolgen, #btnMark, #btnArt{
     flex:0 0 44px; background:var(--surface); border:1px solid var(--border); color:var(--muted); font-size:17px;
   }
   #btnFolgen.an{color:#fff; background:linear-gradient(135deg, #6366f1, #4f46e5)}
@@ -1037,9 +1037,25 @@ svg.leaflet-image-layer.leaflet-interactive path {
 <div id="bar">
   <button id="btnFolgen" class="an" title="Karte folgt der Position">🧭</button>
   <button id="btnMark" title="Aktuellen Standort als Punkt markieren">📌</button>
+  <button id="btnArt" title="Elemente nach Art ein-/ausblenden">👁</button>
   <button id="btnStart">▶ Start</button>
   <button id="btnReset">Zurücksetzen</button>
 </div>
+
+<!-- Elemente nach Elementart ein-/ausblenden (Fahrweg und Abstände bleiben erhalten) -->
+<dialog id="artDlg">
+  <div class="dhead">👁 Elemente ein-/ausblenden<button class="dx" id="artX">✕</button></div>
+  <div class="dbody">
+    <p class="dnote">Haken entfernen = Elemente dieser Art werden auf der Karte ausgeblendet.
+      Fahrweg, Abstände und Messungen bleiben dabei vollständig erhalten.</p>
+    <div id="artBody"></div>
+  </div>
+  <div class="dfoot">
+    <button id="artAlle">Alle einblenden</button>
+    <span style="flex:1"></span>
+    <button id="artOk">OK</button>
+  </div>
+</dialog>
 
 <div id="hinweis"><div class="box" id="hinweisBox"></div></div>
 
@@ -1494,9 +1510,18 @@ let auswahl = [];        // gewählte Punkte in Antipp-Reihenfolge
 let messLinie = null, messTips = [];
 
 function markSpeichern(){ try{ localStorage.setItem(MARK_KEY, JSON.stringify(marks)); }catch(e){} }
+/* Elementart eines Punkts = erstes Wort der Bezeichnung (z. B. „AZ", „W", „FS", „PZB") */
+function markArt(m){ return String(m.name).trim().split(/\s+/)[0] || '—'; }
+/* Ausgeblendete Elementarten — nur die DARSTELLUNG auf der Karte; Daten, Abstände
+   und Messungen bleiben vollständig erhalten */
+const ARTF_KEY = 'synium_gps_artfilter_v1';
+let artVersteckt = new Set();
+try{ const a = JSON.parse(localStorage.getItem(ARTF_KEY) || '[]'); if(Array.isArray(a)) artVersteckt = new Set(a); }catch(e){}
+function artSpeichern(){ try{ localStorage.setItem(ARTF_KEY, JSON.stringify([...artVersteckt])); }catch(e){} }
 function zeichneMark(i){
   const m = marks[i];
-  const cm = L.circleMarker([m.lat, m.lng], { radius:7, color:'#fff', weight:2, fillColor:'#f59e0b', fillOpacity:1 }).addTo(map);
+  const cm = L.circleMarker([m.lat, m.lng], { radius:7, color:'#fff', weight:2, fillColor:'#f59e0b', fillOpacity:1 });
+  if(!artVersteckt.has(markArt(m))) cm.addTo(map);   // ausgeblendete Art: Punkt nicht auf die Karte
   cm.bindTooltip(esc(m.name), { permanent:true, direction:'top', offset:[0, -8], className:'markTip' });
   cm.on('click', e => { L.DomEvent.stop(e); wahlToggle(i); });
   cm.on('contextmenu', e => {
@@ -1668,6 +1693,30 @@ map.on('contextmenu', e => {   // langes Drücken (bzw. Rechtsklick) auf die Kar
   const weg = spurAnschluss(lat, lng);   // an die aufgezeichnete Spur anschließen (falls in der Nähe)
   frageMarkName(name => markAnlegen(lat, lng, name, weg));
 });
+
+/* ===== Elemente nach Elementart ein-/ausblenden ===== */
+function renderArtDlg(){
+  const zaehl = new Map();
+  marks.forEach(m => { const a = markArt(m); zaehl.set(a, (zaehl.get(a) || 0) + 1); });
+  $('artBody').innerHTML = zaehl.size
+    ? [...zaehl.entries()].sort((a, b) => a[0].localeCompare(b[0], 'de')).map(([a, n]) =>
+        '<label class="pRow" style="cursor:pointer"><input type="checkbox" data-art="' + esc(a) + '"' +
+        (artVersteckt.has(a) ? '' : ' checked') + '> <b>' + esc(a) + '</b> <small>(' + n + ' Element' + (n === 1 ? '' : 'e') + ')</small>' +
+        '<span style="flex:1"></span>' + (artVersteckt.has(a) ? '<small>ausgeblendet</small>' : '') + '</label>').join('')
+    : '<p class="dnote" style="margin:0">Noch keine Punkte auf der Karte.</p>';
+  $('artBody').querySelectorAll('input[data-art]').forEach(cb => cb.onchange = () => {
+    if(cb.checked) artVersteckt.delete(cb.dataset.art); else artVersteckt.add(cb.dataset.art);
+    artSpeichern();
+    alleMarksNeu(); messUpdate();   // Karte neu zeichnen — Auswahl und Messungen bleiben
+    renderArtDlg();
+  });
+}
+$('btnArt').onclick = () => { renderArtDlg(); $('artDlg').showModal(); };
+$('artAlle').onclick = () => {
+  artVersteckt.clear(); artSpeichern();
+  alleMarksNeu(); messUpdate(); renderArtDlg();
+};
+$('artX').onclick = $('artOk').onclick = () => $('artDlg').close();
 /* gespeicherte Punkte wiederherstellen */
 try{
   const roh = JSON.parse(localStorage.getItem(MARK_KEY) || '[]');
@@ -2257,7 +2306,8 @@ async function importElemente(file){
         const row = b.grid[i] || [];
         const el = klammerWeg(row[cEl] || '');
         if(!el) continue;
-        const art = cArt >= 0 ? klammerWeg(row[cArt] || '') : '';
+        let art = cArt >= 0 ? klammerWeg(row[cArt] || '') : '';
+        if(/^indusi$/i.test(art)) art = 'PZB';   // Elementart „Indusi" wird als PZB geführt
         eintraege.push(art ? (art + ' ' + el) : el);
       }
       if(eintraege.length)
