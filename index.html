@@ -932,11 +932,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
   @keyframes drift1{to{transform:translate(9vmax,7vmax) scale(1.12)}}
   @keyframes drift2{to{transform:translate(-8vmax,-6vmax) scale(1.08)}}
   @keyframes gridMove{to{background-position:0 46px, 46px 0}}
-  #hdrLogo{height:56px; display:block; flex:none}
+  #hdrLogo{height:67px; display:block; flex:none}
   /* 5-Zoll-Smartphones (schmale Displays) */
   @media (max-width:380px){
     header h1{font-size:15px}
-    #hdrLogo{height:38px}
+    #hdrLogo{height:46px}
     #dist{font-size:42px}
     #distEinheit{font-size:16px}
     .chip{font-size:10.5px; padding:4px 9px}
@@ -990,6 +990,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <button class="mitem" id="btnDb">📂 Gespeicherte Messungen</button>
   <button class="mitem" id="btnProj">🏗 Projektdaten</button>
   <button class="mitem" id="btnUsers" style="display:none">👥 Userdaten</button>
+  <button class="mitem" id="btnCloud">☁ Zentrale Datenbank</button>
   <button class="mitem" id="btnLogout" style="display:none">🚪 Abmelden</button>
 </div>
 
@@ -1084,13 +1085,18 @@ svg.leaflet-image-layer.leaflet-interactive path {
 <dialog id="projDlg">
   <div class="dhead">🏗 Projektdaten<button class="dx" id="projX">✕</button></div>
   <div class="dbody">
+    <label class="dfeld">Projekt wählen<select id="pjWahl"></select></label>
     <label class="dfeld">Name des Projekts<input type="text" id="pjName" autocomplete="off"></label>
     <label class="dfeld">Betriebsstelle<input type="text" id="pjBst" autocomplete="off"></label>
+    <label class="dfeld" id="pjFreiWrap">Freigeschaltet für (Benutzernamen, Komma-getrennt)
+      <input type="text" id="pjFrei" autocomplete="off" placeholder="z. B. max.muster, anna.beispiel"></label>
     <p class="dnote" id="pjHinweis" style="margin:0"></p>
   </div>
   <div class="dfoot">
-    <button id="pjOk">Schließen</button>
+    <button id="pjNeu">➕ Neu</button>
+    <button id="pjLoesch">🗑</button>
     <span style="flex:1"></span>
+    <button id="pjOk">Schließen</button>
     <button id="pjGo" style="background:linear-gradient(135deg,#22c55e,#059669); border:none; color:#fff">✔ Speichern</button>
   </div>
 </dialog>
@@ -1100,6 +1106,30 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <div class="dhead">👥 Userdaten<button class="dx" id="usersX">✕</button></div>
   <div class="dbody" id="usersBody"></div>
   <div class="dfoot"><span style="flex:1"></span><button id="usersOk">OK</button></div>
+</dialog>
+
+<!-- Zentrale Datenbank: privates GitHub-Repository als gemeinsamer Speicher -->
+<dialog id="cloudDlg">
+  <div class="dhead">☁ Zentrale Datenbank<button class="dx" id="cloudX">✕</button></div>
+  <div class="dbody">
+    <p class="dnote" id="cloudStatus">Nicht verbunden</p>
+    <label class="dfeld">Zugangsschlüssel (GitHub-Token für das private Daten-Repository)
+      <input type="password" id="cloudToken" autocomplete="off" placeholder="github_pat_…"></label>
+    <p class="dnote" style="margin:0">
+      Userdaten, Projektdaten und gespeicherte Messungen werden zentral im <b>privaten</b>
+      GitHub-Repository <b>synium-daten</b> abgelegt und auf allen verbundenen Geräten
+      zusammengeführt. Den Zugangsschlüssel erstellt der Master-Admin einmal auf github.com
+      (Settings → Developer settings → Fine-grained tokens: nur Repository „synium-daten",
+      Berechtigung „Contents: Read and write") und trägt ihn hier je Gerät ein — er wird
+      nur auf diesem Gerät gespeichert.</p>
+  </div>
+  <div class="dfoot">
+    <button id="cloudTrenn">Trennen</button>
+    <button id="cloudNow">🔄 Jetzt synchronisieren</button>
+    <span style="flex:1"></span>
+    <button id="cloudOk">Schließen</button>
+    <button id="cloudSave" style="background:linear-gradient(135deg,#22c55e,#059669); border:none; color:#fff">✔ Verbinden</button>
+  </div>
 </dialog>
 
 <!-- Punkte verwalten: löschen, umbenennen, neue zufügen -->
@@ -1248,7 +1278,9 @@ function fix(pos){
   if(!letzterFix){
     if(!punkte.length) trackId = String(Date.now());   // neue Weg-Aufzeichnung beginnt
     p.d = distanz;
-    letzterFix = p; punkte.push(p); pfad.addLatLng(p); speichern(); anzeigen();
+    letzterFix = p; punkte.push(p); pfad.addLatLng(p);
+    markeAnbinden(p);
+    speichern(); anzeigen();
     return;
   }
   if(still){ tempoAktuell = 0; anzeigen(); return; }
@@ -1266,8 +1298,24 @@ function fix(pos){
   tempoAktuell = (d / dt) * 3.6;
   p.d = distanz;   // Kilometerstand der Spur an diesem Wegpunkt
   letzterFix = p; punkte.push(p); pfad.addLatLng(p);
+  markeAnbinden(p);
   speichern(); anzeigen();
   if(auswahl.length === 1) messUpdate();   // Echtzeit: zurückgelegter Weg seit dem gewählten Punkt
+}
+/* Markierte Punkte OHNE Anschluss an die aktuelle Spur automatisch anbinden, sobald die
+   Fahrt an ihnen vorbeiführt (≤ 30 m) — z. B. ein vor dem Start gesetzter Punkt oder
+   Punkte aus einer früheren Aufzeichnung. Dadurch messen die Abstände den
+   ZURÜCKGELEGTEN WEG statt der Luftlinie. */
+function markeAnbinden(p){
+  let geaendert = false;
+  for(const m of marks){
+    if(m.tid === trackId && m.wegD != null) continue;   // schon an der aktuellen Spur
+    if(entf(m, p) <= 30){ m.wegD = distanz; m.tid = trackId; geaendert = true; }
+  }
+  if(geaendert){
+    markSpeichern();
+    if(auswahl.length) messUpdate();
+  }
 }
 function fixFehler(err){
   $('gpsTxt').textContent = err.code === 1 ? 'verweigert' : 'kein Signal';
@@ -1683,7 +1731,7 @@ $('btnTabPdf').onclick = () => {
   $('printTbl').innerHTML =
     '<img class="pLogo" src="' + $('splashLogo').src + '">' +
     '<h1>Abstands-Tabelle — LST Abstandmessung</h1>' +
-    '<div class="pMeta">Projekt: <b>' + esc(B.projekt.name || '—') + '</b> &nbsp;·&nbsp; Betriebsstelle: <b>' + esc(B.projekt.betriebsstelle || '—') + '</b>' +
+    '<div class="pMeta">Projekt: <b>' + esc(aktP().name || '—') + '</b> &nbsp;·&nbsp; Betriebsstelle: <b>' + esc(aktP().betriebsstelle || '—') + '</b>' +
     '<br>Erstellt am: <b>' + now.toLocaleString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) + ' Uhr</b>' +
     ' &nbsp;·&nbsp; von: <b>' + esc(loggedIn() ? userDisp(sessU()) : '—') + '</b>' +
     '<br>Prüf Tool: SYNIUM LST Abstandmessung &nbsp;·&nbsp; Grundlage: ' + esc(d.quelle) + '</div>' +
@@ -1698,7 +1746,8 @@ $('btnTabPdf').onclick = () => {
 /* ================= Messungs-Datenbank (im Gerät, per JSON-Datei sicherbar) ================= */
 const DB_KEY = 'synium_gps_mess_db_v1';
 function dbLese(){ try{ const d = JSON.parse(localStorage.getItem(DB_KEY) || '[]'); return Array.isArray(d) ? d : []; }catch(e){ return []; } }
-function dbSchreibe(d){ try{ localStorage.setItem(DB_KEY, JSON.stringify(d)); }catch(e){} }
+function dbSchreibeOhneSync(d){ try{ localStorage.setItem(DB_KEY, JSON.stringify(d)); }catch(e){} }
+function dbSchreibe(d){ dbSchreibeOhneSync(d); cloudPlan(); }
 $('btnTabSave').onclick = () => {
   const d = tabDaten();
   if(!d.rows.length){ alert('Keine Abstände zum Speichern vorhanden.'); return; }
@@ -1706,19 +1755,43 @@ $('btnTabSave').onclick = () => {
   if(name === null) return;
   const db = dbLese();
   db.push({ id:String(Date.now()), name:(name.trim() || 'Messung'), zeit:new Date().toISOString(),
-    marks: marks.map(m => ({ ...m })), rows: d.rows, gesamt: d.gesamt, quelle: d.quelle });
+    owner: sessU(), projektId: aktP().id || '',
+    marks: marks.map(m => ({ ...m })), rows: d.rows, gesamt: d.gesamt, quelle: d.quelle,
+    updatedAt: Date.now(), geloescht: false });
   dbSchreibe(db);
   alert('Messung „' + (name.trim() || 'Messung') + '" gespeichert — ' + d.rows.length + ' Abstände, gesamt ' + d.gesamt + ' m.');
 };
+/* Sichtbarkeit: jeder sieht die EIGENEN Messungen — fremde nur, wenn der Schalter
+   „Messungen anderer User anzeigen" aktiv ist. Löschen darf nur der Ersteller
+   (oder der Master-Admin). */
+let dbAndereAn = localStorage.getItem('synium_gps_db_andere_v1') === '1';
+function darfMessung(e){ return sessRole() === 'master' || String(e.owner || '') === '' || String(e.owner || '').toLowerCase() === sessU().toLowerCase(); }
 function renderDb(){
-  const db = dbLese();
-  $('dbBody').innerHTML = db.length
-    ? db.slice().reverse().map(e =>
-        '<div class="dbRow"><div><b>' + esc(e.name) + '</b><br><small>' +
-        new Date(e.zeit).toLocaleString('de-DE') + ' · ' + e.rows.length + ' Abstände · gesamt ' + e.gesamt + ' m</small></div>' +
-        '<span style="flex:1"></span>' +
-        '<button data-lade="' + e.id + '">Laden</button><button data-del="' + e.id + '">🗑</button></div>').join('')
-    : '<p class="dnote" style="margin:0">Noch keine gespeicherten Messungen. In der Abstands-Tabelle über „💾 Speichern" ablegen.</p>';
+  const alle = dbLese().filter(e => !e.geloescht);
+  const eigene = alle.filter(e => darfMessung(e));
+  const fremde = alle.filter(e => !darfMessung(e));
+  const sichtbar = dbAndereAn ? alle : eigene;
+  const zeile = e => {
+    const meins = darfMessung(e);
+    return '<div class="dbRow"><div><b>' + esc(e.name) + '</b><br><small>' +
+      new Date(e.zeit).toLocaleString('de-DE') + ' · ' + e.rows.length + ' Abstände · gesamt ' + e.gesamt + ' m' +
+      ' · 👤 ' + esc(e.owner ? userDisp(e.owner) : '—') + '</small></div>' +
+      '<span style="flex:1"></span>' +
+      '<button data-lade="' + e.id + '">Laden</button>' +
+      (meins ? '<button data-del="' + e.id + '">🗑</button>' : '') + '</div>';
+  };
+  $('dbBody').innerHTML =
+    '<label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted); margin:0 0 10px; cursor:pointer">' +
+      '<input type="checkbox" id="dbAndere"' + (dbAndereAn ? ' checked' : '') + '> Messungen anderer User anzeigen' +
+      (fremde.length ? ' (' + fremde.length + ' vorhanden)' : '') + '</label>' +
+    (sichtbar.length
+      ? sichtbar.slice().reverse().map(zeile).join('')
+      : '<p class="dnote" style="margin:0">Noch keine gespeicherten Messungen. In der Abstands-Tabelle über „💾 Speichern" ablegen.</p>');
+  $('dbAndere').onchange = () => {
+    dbAndereAn = $('dbAndere').checked;
+    localStorage.setItem('synium_gps_db_andere_v1', dbAndereAn ? '1' : '0');
+    renderDb();
+  };
   $('dbBody').querySelectorAll('button[data-lade]').forEach(b => b.onclick = () => {
     const e = dbLese().find(x => x.id === b.dataset.lade); if(!e) return;
     marks = (e.marks || []).map(m => ({ ...m })); auswahl = [];
@@ -1728,8 +1801,10 @@ function renderDb(){
   });
   $('dbBody').querySelectorAll('button[data-del]').forEach(b => b.onclick = () => {
     const db2 = dbLese(), e = db2.find(x => x.id === b.dataset.del);
-    if(!confirm('Messung „' + (e ? e.name : '?') + '" wirklich löschen?')) return;
-    dbSchreibe(db2.filter(x => x.id !== b.dataset.del)); renderDb();
+    if(!e || !darfMessung(e)) return;   // nur Ersteller oder Master-Admin
+    if(!confirm('Messung „' + e.name + '" wirklich löschen?')) return;
+    e.geloescht = true; e.updatedAt = Date.now();   // Tombstone — Löschen gewinnt beim Zusammenführen
+    dbSchreibe(db2); renderDb();
   });
 }
 $('btnDb').onclick = () => { $('menuPanel').hidden = true; renderDb(); $('dbDlg').showModal(); };
@@ -1760,19 +1835,39 @@ $('dbFile').onchange = async e => {
    Master-Admin oder Admins ändern — einsehbar sind sie für alle registrierten User. */
 const B_KEY = 'synium_gps_benutzer_v1';
 const MASTER_KEY = '090714', MASTER_U = '__master__', MASTER_NAME = 'Anis El Aoud';
-let B = { users: [], session: null, projekt: { name:'', betriebsstelle:'' } };
+/* Mehrere Projekte: anlegen/ändern nur Master (bzw. Admin). Normale User sehen NUR
+   Projekte, die der Master-Admin für sie freigeschaltet hat (freigabe-Liste). */
+let B = { users: [], session: null, projekte: [], aktivProjekt: '' };
 try{
   const b = JSON.parse(localStorage.getItem(B_KEY) || 'null');
   if(b && typeof b === 'object'){
     B.users = Array.isArray(b.users) ? b.users.filter(u => u && u.benutzername) : [];
     B.session = (b.session && b.session.u) ? b.session : null;
-    B.projekt = { name: String((b.projekt && b.projekt.name) || ''), betriebsstelle: String((b.projekt && b.projekt.betriebsstelle) || '') };
+    B.projekte = Array.isArray(b.projekte) ? b.projekte.filter(p => p && p.id) : [];
+    B.aktivProjekt = String(b.aktivProjekt || '');
+    // Altbestand (einzelnes Projekt) übernehmen
+    if(!B.projekte.length && b.projekt && (b.projekt.name || b.projekt.betriebsstelle)){
+      B.projekte.push({ id:'p' + Date.now(), name:String(b.projekt.name || ''), betriebsstelle:String(b.projekt.betriebsstelle || ''),
+        freigabe:[], owner:MASTER_U, updatedAt:Date.now(), geloescht:false });
+      B.aktivProjekt = B.projekte[0].id;
+    }
   }
 }catch(e){}
-function bSpeicher(){ try{ localStorage.setItem(B_KEY, JSON.stringify(B)); }catch(e){} }
+/* Projekte, die der angemeldete User sehen darf */
+function meineProjekte(){
+  const rolle = sessRole();
+  return B.projekte.filter(p => !p.geloescht &&
+    (rolle === 'master' || rolle === 'admin' || (p.freigabe || []).some(f => f.toLowerCase() === sessU().toLowerCase())));
+}
+function aktP(){
+  const liste = meineProjekte();
+  return liste.find(p => p.id === B.aktivProjekt) || liste[0] || { id:'', name:'', betriebsstelle:'' };
+}
+function bSpeicherOhneSync(){ try{ localStorage.setItem(B_KEY, JSON.stringify(B)); }catch(e){} }
+function bSpeicher(){ bSpeicherOhneSync(); cloudPlan(); }
 const loggedIn = () => !!(B.session && B.session.u);
 const sessU = () => loggedIn() ? B.session.u : '';
-function findUser(bn){ return B.users.find(u => u.benutzername.toLowerCase() === String(bn).toLowerCase()); }
+function findUser(bn){ return B.users.find(u => !u.geloescht && u.benutzername.toLowerCase() === String(bn).toLowerCase()); }
 function sessRole(){
   if(!loggedIn()) return '';
   if(sessU() === MASTER_U) return 'master';
@@ -1791,16 +1886,16 @@ function applyUserUi(){
     : '👤 Nicht angemeldet';
   $('btnUsers').style.display = sessRole() === 'master' ? '' : 'none';
   $('btnLogout').style.display = loggedIn() ? '' : 'none';
-  const pz = $('projZeile');
-  if(B.projekt.name || B.projekt.betriebsstelle){
+  const pz = $('projZeile'), p = aktP();
+  if(loggedIn() && (p.name || p.betriebsstelle)){
     pz.hidden = false;
-    pz.textContent = '🏗 ' + [B.projekt.name, B.projekt.betriebsstelle].filter(Boolean).join(' · ');
+    pz.textContent = '🏗 ' + [p.name, p.betriebsstelle].filter(Boolean).join(' · ');
   } else pz.hidden = true;
 }
 /* Anmeldung — Pflicht beim Start (wie in den anderen SYNIUM-Apps) */
 function openLogin(){
   $('liUser').innerHTML =
-    B.users.map(u => '<option value="' + esc(u.benutzername) + '">' + esc(userDisp(u.benutzername)) + '</option>').join('') +
+    B.users.filter(u => !u.geloescht).map(u => '<option value="' + esc(u.benutzername) + '">' + esc(userDisp(u.benutzername)) + '</option>').join('') +
     '<option value="' + MASTER_U + '">🔑 ' + esc(MASTER_NAME) + ' — Master-Admin (Masterschlüssel)</option>';
   $('liPin').value = '';
   $('liHint').textContent = B.users.length ? '' :
@@ -1838,7 +1933,9 @@ $('rGo').onclick = () => {
   if(findUser(bn) || bn === MASTER_U){ alert('Der Benutzername ist bereits vergeben.'); return; }
   if(!/^\d{6}$/.test(pin)){ alert('Der PIN muss aus genau 6 Ziffern bestehen.'); return; }
   if(pin !== pin2){ alert('Die PIN-Wiederholung stimmt nicht überein.'); return; }
-  B.users.push({ benutzername: bn, vorname: vor, name: nach, pin, admin: false, seit: Date.now() });
+  const tomb = B.users.find(u => u.geloescht && u.benutzername.toLowerCase() === bn);
+  if(tomb) Object.assign(tomb, { benutzername: bn, vorname: vor, name: nach, pin, admin: false, geloescht: false, updatedAt: Date.now() });
+  else B.users.push({ benutzername: bn, vorname: vor, name: nach, pin, admin: false, geloescht: false, seit: Date.now(), updatedAt: Date.now() });
   B.session = { u: bn, seit: Date.now() };
   bSpeicher(); applyUserUi();
   $('regDlg').close();
@@ -1849,26 +1946,64 @@ $('btnLogout').onclick = () => {
   $('menuPanel').hidden = true;
   B.session = null; bSpeicher(); applyUserUi(); openLogin();
 };
-/* Projektdaten */
-$('btnProj').onclick = () => {
-  $('menuPanel').hidden = true;
-  const darf = sessRole() === 'master' || sessRole() === 'admin';
-  $('pjName').value = B.projekt.name; $('pjBst').value = B.projekt.betriebsstelle;
-  $('pjName').disabled = $('pjBst').disabled = !darf;
+/* Projektdaten — mehrere Projekte; anlegen/ändern nur Master/Admin, Freigaben nur Master.
+   Normale User sehen und wählen ausschließlich für sie freigeschaltete Projekte. */
+let pjAktId = '';
+function renderProj(){
+  const rolle = sessRole(), darf = rolle === 'master' || rolle === 'admin';
+  const liste = meineProjekte();
+  if(!liste.some(p => p.id === pjAktId)) pjAktId = (liste[0] || {}).id || '';
+  $('pjWahl').innerHTML = liste.length
+    ? liste.map(p => '<option value="' + esc(p.id) + '"' + (p.id === pjAktId ? ' selected' : '') + '>' + esc(p.name || '(ohne Name)') + '</option>').join('')
+    : '<option value="">— kein Projekt freigeschaltet —</option>';
+  const p = liste.find(x => x.id === pjAktId);
+  $('pjName').value = p ? p.name : '';
+  $('pjBst').value = p ? p.betriebsstelle : '';
+  $('pjFrei').value = p ? (p.freigabe || []).join(', ') : '';
+  $('pjName').disabled = $('pjBst').disabled = $('pjFrei').disabled = !darf || !p;
+  $('pjFreiWrap').style.display = rolle === 'master' ? '' : 'none';
+  $('pjNeu').style.display = darf ? '' : 'none';
+  $('pjLoesch').style.display = (darf && p) ? '' : 'none';
+  $('pjGo').style.display = (darf && p) ? '' : 'none';
   $('pjHinweis').textContent = darf ? '' :
-    'Ändern kann die Projektdaten nur der Master-Admin oder ein Admin — hier sind sie für alle registrierten User einsehbar.';
-  $('pjGo').style.display = darf ? '' : 'none';
-  $('projDlg').showModal();
+    (liste.length
+      ? 'Projekte anlegen und ändern kann nur der Master-Admin oder ein Admin — du kannst deine freigeschalteten Projekte auswählen und einsehen.'
+      : 'Für dich ist noch kein Projekt freigeschaltet — der Master-Admin schaltet Projekte unter „Projektdaten → Freigeschaltet für" frei.');
+}
+$('btnProj').onclick = () => { $('menuPanel').hidden = true; pjAktId = aktP().id; renderProj(); $('projDlg').showModal(); };
+$('pjWahl').onchange = () => {
+  pjAktId = $('pjWahl').value;
+  B.aktivProjekt = pjAktId;
+  bSpeicher(); applyUserUi(); renderProj();
+};
+$('pjNeu').onclick = () => {
+  const p = { id:'p' + Date.now(), name:'Neues Projekt', betriebsstelle:'', freigabe:[], owner:sessU(), updatedAt:Date.now(), geloescht:false };
+  B.projekte.push(p);
+  pjAktId = p.id; B.aktivProjekt = p.id;
+  bSpeicher(); applyUserUi(); renderProj();
+};
+$('pjLoesch').onclick = () => {
+  const p = B.projekte.find(x => x.id === pjAktId); if(!p) return;
+  if(!confirm('Projekt „' + p.name + '" wirklich löschen?')) return;
+  p.geloescht = true; p.updatedAt = Date.now();
+  bSpeicher(); applyUserUi(); renderProj();
 };
 $('pjGo').onclick = () => {
-  B.projekt = { name: $('pjName').value.trim(), betriebsstelle: $('pjBst').value.trim() };
+  const p = B.projekte.find(x => x.id === pjAktId); if(!p) return;
+  p.name = $('pjName').value.trim();
+  p.betriebsstelle = $('pjBst').value.trim();
+  if(sessRole() === 'master')
+    p.freigabe = $('pjFrei').value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  p.updatedAt = Date.now();
+  B.aktivProjekt = p.id;
   bSpeicher(); applyUserUi();
   $('projDlg').close();
 };
 $('projX').onclick = $('pjOk').onclick = () => $('projDlg').close();
 /* Userdaten (nur Master-Admin) */
 function renderUsers(){
-  $('usersBody').innerHTML = B.users.length ? B.users.map(u =>
+  const aktive = B.users.filter(u => !u.geloescht);
+  $('usersBody').innerHTML = aktive.length ? aktive.map(u =>
     '<div class="pRow"><div><b>' + esc((u.vorname + ' ' + u.name).trim()) + '</b><br><small>' + esc(u.benutzername) + '</small></div>' +
     '<span style="flex:1"></span>' +
     '<label style="display:inline-flex; align-items:center; gap:6px; font-size:12.5px"><input type="checkbox" data-adm="' + esc(u.benutzername) + '"' + (u.admin ? ' checked' : '') + '> Admin</label>' +
@@ -1876,11 +2011,12 @@ function renderUsers(){
     : '<p class="dnote" style="margin:0">Noch keine registrierten User.</p>';
   $('usersBody').querySelectorAll('input[data-adm]').forEach(cb => cb.onchange = () => {
     const u = findUser(cb.dataset.adm);
-    if(u){ u.admin = cb.checked; bSpeicher(); }
+    if(u){ u.admin = cb.checked; u.updatedAt = Date.now(); bSpeicher(); }
   });
   $('usersBody').querySelectorAll('button[data-udel]').forEach(b => b.onclick = () => {
     if(!confirm('User „' + userDisp(b.dataset.udel) + '" wirklich löschen?')) return;
-    B.users = B.users.filter(x => x.benutzername.toLowerCase() !== b.dataset.udel.toLowerCase());
+    const u = findUser(b.dataset.udel);
+    if(u){ u.geloescht = true; u.admin = false; u.updatedAt = Date.now(); }   // Tombstone — gewinnt beim Zusammenführen
     bSpeicher(); renderUsers();
   });
 }
@@ -1924,6 +2060,116 @@ $('pkNeu').onclick = () => {
   renderPunkteDlg();
 };
 $('pkX').onclick = $('pkOk').onclick = () => $('pkDlg').close();
+
+/* ================= Zentrale Datenbank: privates GitHub-Repository =================
+   Der Zugangsschlüssel wird je Gerät eingetragen und NUR dort gespeichert — er steht
+   nie im öffentlichen Code. Beim Synchronisieren werden Userdaten, Projekte und
+   Messungen per Zeitstempel zusammengeführt (Tombstones: Löschen gewinnt). */
+const CLOUD_REPO = 'yacoubanis-bit/synium-daten';
+const CLOUD_PFAD = 'datenbank.json';
+const CLOUD_TOKEN_KEY = 'synium_gps_cloud_token_v1';
+let cloudToken = localStorage.getItem(CLOUD_TOKEN_KEY) || '';
+let cloudBusy = false, cloudNochmal = false, cloudInfo = '';
+function cloudStatusSetzen(txt){ cloudInfo = txt; const el = $('cloudStatus'); if(el) el.textContent = txt; }
+const b64codieren = s => btoa(unescape(encodeURIComponent(s)));
+const b64lesen = s => decodeURIComponent(escape(atob(String(s).replace(/\n/g, ''))));
+async function cloudLese(){
+  const r = await fetch('https://api.github.com/repos/' + CLOUD_REPO + '/contents/' + CLOUD_PFAD + '?t=' + Date.now(), {
+    headers:{ 'Authorization':'Bearer ' + cloudToken, 'Accept':'application/vnd.github+json' }, cache:'no-store' });
+  if(r.status === 404) return { daten:null, sha:null };   // Datei existiert noch nicht — wird beim ersten Speichern angelegt
+  if(r.status === 401 || r.status === 403) throw new Error('Zugangsschlüssel ungültig oder ohne Berechtigung (HTTP ' + r.status + ')');
+  if(!r.ok) throw new Error('GitHub-Zugriff fehlgeschlagen (HTTP ' + r.status + ')');
+  const j = await r.json();
+  let daten = null;
+  try{ daten = JSON.parse(b64lesen(j.content)); }catch(e){}
+  return { daten, sha: j.sha };
+}
+async function cloudSchreibe(daten, sha){
+  const body = { message:'SYNIUM LST Abstandmessung — Datenstand', content: b64codieren(JSON.stringify(daten)) };
+  if(sha) body.sha = sha;
+  const r = await fetch('https://api.github.com/repos/' + CLOUD_REPO + '/contents/' + CLOUD_PFAD, {
+    method:'PUT',
+    headers:{ 'Authorization':'Bearer ' + cloudToken, 'Accept':'application/vnd.github+json' },
+    body: JSON.stringify(body)
+  });
+  if(!r.ok) throw new Error('Speichern in der zentralen Datenbank fehlgeschlagen (HTTP ' + r.status + ')');
+}
+/* Listen per Schlüssel + Zeitstempel zusammenführen — der neuere Eintrag gewinnt */
+function mischeListe(a, b, schluessel){
+  const map = new Map();
+  for(const x of [...(a || []), ...(b || [])]){
+    if(!x || !x[schluessel]) continue;
+    const k = String(x[schluessel]).toLowerCase();
+    const alt = map.get(k);
+    if(!alt || (x.updatedAt || 0) >= (alt.updatedAt || 0)) map.set(k, x);
+  }
+  return [...map.values()];
+}
+async function cloudSync(leise){
+  if(!cloudToken) return false;
+  if(cloudBusy){ cloudNochmal = true; return true; }
+  cloudBusy = true;
+  try{
+    cloudStatusSetzen('⏳ Synchronisiere …');
+    const fern = await cloudLese();
+    const f = fern.daten || {};
+    B.users = mischeListe(f.users, B.users, 'benutzername');
+    B.projekte = mischeListe(f.projekte, B.projekte, 'id');
+    const mess = mischeListe(f.messungen, dbLese(), 'id');
+    dbSchreibeOhneSync(mess);
+    bSpeicherOhneSync();
+    const lokalStand = JSON.stringify({ users:B.users, projekte:B.projekte, messungen:mess });
+    const fernStand = fern.daten ? JSON.stringify({ users:f.users || [], projekte:f.projekte || [], messungen:f.messungen || [] }) : '';
+    if(lokalStand !== fernStand)
+      await cloudSchreibe({ app:'SYNIUM-LST-DB', version:1, stand:new Date().toISOString(),
+        users:B.users, projekte:B.projekte, messungen:mess }, fern.sha);
+    applyUserUi();
+    cloudStatusSetzen('✅ Verbunden — letzter Abgleich ' + new Date().toLocaleTimeString('de-DE') + ' Uhr');
+    return true;
+  }catch(err){
+    cloudStatusSetzen('⚠ ' + (err.message || err));
+    if(!leise) alert('Zentrale Datenbank: ' + (err.message || err));
+    return false;
+  }finally{
+    cloudBusy = false;
+    if(cloudNochmal){ cloudNochmal = false; setTimeout(() => cloudSync(true), 600); }
+  }
+}
+/* verzögerter Abgleich nach jeder Änderung */
+function cloudPlan(){
+  if(!cloudToken) return;
+  clearTimeout(cloudPlan.t);
+  cloudPlan.t = setTimeout(() => cloudSync(true), 1500);
+}
+$('btnCloud').onclick = () => {
+  $('menuPanel').hidden = true;
+  $('cloudToken').value = cloudToken;
+  cloudStatusSetzen(cloudToken ? (cloudInfo || 'Zugangsschlüssel hinterlegt.') : 'Nicht verbunden');
+  $('cloudDlg').showModal();
+};
+$('cloudX').onclick = $('cloudOk').onclick = () => $('cloudDlg').close();
+$('cloudSave').onclick = async () => {
+  cloudToken = $('cloudToken').value.trim();
+  if(cloudToken){
+    localStorage.setItem(CLOUD_TOKEN_KEY, cloudToken);
+    const ok = await cloudSync(false);
+    if(ok) alert('Zentrale Datenbank verbunden — Daten wurden abgeglichen.');
+  } else {
+    localStorage.removeItem(CLOUD_TOKEN_KEY);
+    cloudStatusSetzen('Nicht verbunden');
+  }
+};
+$('cloudNow').onclick = () => cloudSync(false);
+$('cloudTrenn').onclick = () => {
+  cloudToken = '';
+  localStorage.removeItem(CLOUD_TOKEN_KEY);
+  $('cloudToken').value = '';
+  cloudStatusSetzen('Nicht verbunden — der Schlüssel wurde von diesem Gerät entfernt.');
+};
+if(cloudToken){
+  setTimeout(() => cloudSync(true), 800);          // beim Start abgleichen (vor der Anmeldung)
+  setInterval(() => cloudSync(true), 60000);       // und danach jede Minute
+}
 
 applyUserUi();
 setTimeout(() => { if(!loggedIn()) openLogin(); }, 4900);   // Anmeldung nach dem Intro
