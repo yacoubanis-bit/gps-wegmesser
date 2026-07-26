@@ -827,6 +827,16 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .pRow{display:flex; align-items:center; gap:8px; padding:8px 11px; border:1px solid var(--border); border-radius:11px; margin-bottom:7px; font-size:13.5px; line-height:1.35}
   .pRow small{color:var(--muted)}
   .pRow button{flex:none; min-height:34px; padding:0 11px; font-size:13px; background:var(--surface); border:1px solid var(--border); color:var(--fg); border-radius:8px}
+  /* Elementlisten (je Excel-Blatt eine Liste, auf-/zuklappbar) */
+  .elGrp{border:1px solid var(--border); border-radius:11px; margin-bottom:8px; overflow:hidden}
+  .elKopf{display:flex; align-items:center; gap:8px; padding:10px 12px; cursor:pointer; font-size:13.5px}
+  .elKopf small{color:var(--muted)}
+  .elKopf button{flex:none; min-height:30px; padding:0 10px; font-size:12px; background:var(--surface); border:1px solid var(--border); color:var(--muted); border-radius:8px}
+  .pfeilEl{color:var(--muted); flex:none}
+  .elListe{border-top:1px solid var(--border); max-height:260px; overflow-y:auto; padding:4px 0}
+  .elEintrag{padding:6px 14px; font-size:13px; border-bottom:1px solid rgba(148,163,214,.08)}
+  .elEintrag:last-child{border-bottom:none}
+
   /* gewählte Tabellenzeilen (Summen-Auswahl) */
   #tabT tbody tr{cursor:pointer}
   #tabT tbody tr.selz td{background:rgba(236,72,153,.18)}
@@ -1001,6 +1011,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <button class="mitem" id="btnTabelle">📏 Abstands-Tabelle</button>
   <button class="mitem" id="btnPunkte">📍 Punkte verwalten</button>
   <button class="mitem" id="btnDb">📂 Gespeicherte Messungen</button>
+  <button class="mitem" id="btnElemente">📚 Elementlisten</button>
   <button class="mitem" id="btnProj">🏗 Projektdaten</button>
   <button class="mitem" id="btnUsers" style="display:none">👥 Userdaten</button>
   <button class="mitem" id="btnCloud">☁ Zentrale Datenbank</button>
@@ -1069,6 +1080,18 @@ svg.leaflet-image-layer.leaflet-interactive path {
   </div>
 </dialog>
 <input type="file" id="dbFile" accept=".json" hidden>
+<input type="file" id="elFile" accept=".xlsx" hidden>
+
+<!-- Elementlisten: je Excel-Blatt (Gleis 1, Gleis 2, …, AzZw Weichen) eine Liste -->
+<dialog id="elDlg">
+  <div class="dhead">📚 Elementlisten<button class="dx" id="elX">✕</button></div>
+  <div class="dbody" id="elBody"></div>
+  <div class="dfoot">
+    <button id="elLaden">📄 Excel laden …</button>
+    <span style="flex:1"></span>
+    <button id="elOk">OK</button>
+  </div>
+</dialog>
 
 <!-- Anmeldung (SYNIUM-Benutzersystem — derselbe Master-Admin wie in allen Apps) -->
 <dialog id="loginDlg">
@@ -2051,6 +2074,172 @@ $('dbFile').onchange = async e => {
   }catch(err){ alert('Import fehlgeschlagen: ' + (err.message || err)); }
 };
 
+/* ================= Elementlisten aus Excel =================
+   Jedes Blatt „Gleis …" bzw. „AzZw …" wird zu EINER Liste. Übernommen wird nur die
+   Spalte „Element(e)" — eckige Klammern mit Zahl (z. B. „[3]") werden entfernt,
+   die Elementart aus der Abkürzungs-Spalte (Az, W, …) wird vorangestellt. */
+async function unzip(buf){
+  const dv = new DataView(buf), u8 = new Uint8Array(buf), td = new TextDecoder();
+  let eocd = -1;
+  for(let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 22 - 65557); i--){
+    if(dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; }
+  }
+  if(eocd < 0) throw new Error('Das ist keine gültige .xlsx-Datei.');
+  const count = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const entries = {};
+  for(let n = 0; n < count; n++){
+    if(dv.getUint32(off, true) !== 0x02014b50) break;
+    const method   = dv.getUint16(off + 10, true);
+    const compSize = dv.getUint32(off + 20, true);
+    const nameLen  = dv.getUint16(off + 28, true);
+    const extraLen = dv.getUint16(off + 30, true);
+    const cmtLen   = dv.getUint16(off + 32, true);
+    const lho      = dv.getUint32(off + 42, true);
+    const name = td.decode(u8.subarray(off + 46, off + 46 + nameLen));
+    entries[name] = { method, compSize, lho };
+    off += 46 + nameLen + extraLen + cmtLen;
+  }
+  return {
+    names: Object.keys(entries),
+    async read(name){
+      const e = entries[name]; if(!e) return null;
+      const nl = dv.getUint16(e.lho + 26, true), el = dv.getUint16(e.lho + 28, true);
+      const start = e.lho + 30 + nl + el;
+      const data = u8.slice(start, start + e.compSize);
+      if(e.method === 0) return data;
+      if(e.method === 8){
+        const ab = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
+        return new Uint8Array(ab);
+      }
+      throw new Error('Nicht unterstützte ZIP-Kompression (' + e.method + ')');
+    }
+  };
+}
+function colIndex(ref){ let n = 0; for(const ch of ref){ if(ch >= 'A' && ch <= 'Z') n = n * 26 + ch.charCodeAt(0) - 64; else break; } return Math.max(0, n - 1); }
+/* Alle Blätter einer .xlsx als [{name, grid}] lesen */
+async function xlsxAlleBlaetter(buf){
+  const z = await unzip(buf), td = new TextDecoder();
+  const xml = async n => { const d = await z.read(n); return d ? new DOMParser().parseFromString(td.decode(d), 'application/xml') : null; };
+  const sst = [];
+  const sstDoc = await xml('xl/sharedStrings.xml');
+  if(sstDoc) for(const si of sstDoc.getElementsByTagName('si')){
+    let t = ''; for(const tn of si.getElementsByTagName('t')) t += tn.textContent; sst.push(t);
+  }
+  const wbDoc = await xml('xl/workbook.xml'), relDoc = await xml('xl/_rels/workbook.xml.rels');
+  if(!wbDoc || !relDoc) throw new Error('Arbeitsmappe unlesbar.');
+  const ziele = {};
+  for(const rel of relDoc.getElementsByTagName('Relationship')){
+    let tgt = rel.getAttribute('Target').replace(/^\//, '');
+    if(!/^xl\//.test(tgt)) tgt = 'xl/' + tgt;
+    ziele[rel.getAttribute('Id')] = tgt;
+  }
+  const blaetter = [];
+  for(const sheet of wbDoc.getElementsByTagName('sheet')){
+    const rid = sheet.getAttribute('r:id') || sheet.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+    const target = ziele[rid];
+    if(!target || !z.names.includes(target)) continue;
+    const shDoc = await xml(target);
+    const grid = [];
+    let seq = 0;
+    for(const row of shDoc.getElementsByTagName('row')){
+      const r = parseInt(row.getAttribute('r') || (seq + 1), 10); seq = r;
+      const cells = [];
+      for(const c of row.getElementsByTagName('c')){
+        const col = colIndex(c.getAttribute('r') || '');
+        const t = c.getAttribute('t');
+        let val = '';
+        if(t === 'inlineStr'){ const tn = c.getElementsByTagName('t')[0]; val = tn ? tn.textContent : ''; }
+        else{ const v = c.getElementsByTagName('v')[0]; if(v) val = (t === 's') ? (sst[+v.textContent] ?? '') : v.textContent; }
+        cells[col] = String(val);
+      }
+      grid[r - 1] = cells;
+    }
+    blaetter.push({ name: (sheet.getAttribute('name') || '').trim(), grid });
+  }
+  return blaetter;
+}
+const EL_KEY = 'synium_gps_elemente_v1';
+function elLese(){ try{ const d = JSON.parse(localStorage.getItem(EL_KEY) || '[]'); return Array.isArray(d) ? d : []; }catch(e){ return []; } }
+function elSchreibeOhneSync(d){ try{ localStorage.setItem(EL_KEY, JSON.stringify(d)); }catch(e){} }
+function elSchreibe(d){ elSchreibeOhneSync(d); cloudPlan(); }
+async function importElemente(file){
+  try{
+    const blaetter = await xlsxAlleBlaetter(await file.arrayBuffer());
+    // nur Gleis-Blätter und AzZw-Blatt (Achszähler zwischen den Weichen)
+    const relevant = blaetter.filter(b => /^gleis\b|^gleis\s*\d/i.test(b.name) || /az\s*\.?\s*zw/i.test(b.name));
+    const dicht = row => Array.from({ length: (row || []).length }, (_, j) => String((row && row[j] != null) ? row[j] : ''));
+    const klammerWeg = s => String(s).replace(/\[\s*\d+\s*\]/g, '').trim();
+    const listen = [];
+    for(const b of relevant){
+      let hi = -1, cEl = -1, cArt = -1;
+      for(let i = 0; i < Math.min(b.grid.length, 40); i++){
+        const d = dicht(b.grid[i]);
+        const ie = d.findIndex(x => /^elemente?$/i.test(x.trim()));
+        if(ie >= 0){
+          hi = i; cEl = ie;
+          cArt = d.findIndex(x => /^abk/i.test(x.trim()));
+          break;
+        }
+      }
+      if(hi < 0) continue;   // Blatt ohne Element-Spalte überspringen
+      const eintraege = [];
+      for(let i = hi + 1; i < b.grid.length; i++){
+        const row = b.grid[i] || [];
+        const el = klammerWeg(row[cEl] || '');
+        if(!el) continue;
+        const art = cArt >= 0 ? klammerWeg(row[cArt] || '') : '';
+        eintraege.push(art ? (art + ' ' + el) : el);
+      }
+      if(eintraege.length)
+        listen.push({ blatt: b.name, eintraege, owner: sessU(), updatedAt: Date.now(), geloescht: false });
+    }
+    if(!listen.length) throw new Error('Keine passenden Blätter (Gleis … / AzZw …) mit einer „Element"-Spalte gefunden.');
+    // je Blattname ersetzen bzw. ergänzen
+    const alle = elLese();
+    for(const l of listen){
+      const i = alle.findIndex(x => x.blatt.toLowerCase() === l.blatt.toLowerCase());
+      if(i >= 0) alle[i] = l; else alle.push(l);
+    }
+    elSchreibe(alle);
+    renderElemente();
+    alert('Elementlisten geladen:\n' + listen.map(l => '• ' + l.blatt + ' (' + l.eintraege.length + ' Elemente)').join('\n'));
+  }catch(err){
+    alert('Elementlisten-Import fehlgeschlagen: ' + (err.message || err));
+  }
+}
+let elOffen = '';   // aufgeklappte Liste
+function renderElemente(){
+  if(!$('elDlg').open && !$('elBody')) return;
+  const listen = elLese().filter(l => !l.geloescht);
+  $('elBody').innerHTML = listen.length
+    ? listen.map(l =>
+        '<div class="elGrp"><div class="elKopf" data-el="' + esc(l.blatt) + '"><b>' + esc(l.blatt) + '</b>' +
+        ' <small>(' + l.eintraege.length + ' Elemente)</small>' +
+        '<span style="flex:1"></span><button data-eldel="' + esc(l.blatt) + '" title="Liste löschen">🗑</button>' +
+        '<span class="pfeilEl">' + (elOffen === l.blatt ? '▾' : '▸') + '</span></div>' +
+        (elOffen === l.blatt
+          ? '<div class="elListe">' + l.eintraege.map(e => '<div class="elEintrag">' + esc(e) + '</div>').join('') + '</div>'
+          : '') + '</div>').join('')
+    : '<p class="dnote" style="margin:0">Noch keine Elementlisten — über „📄 Excel laden …" die Elementliste einlesen ' +
+      '(je Blatt „Gleis …" bzw. „AzZw …" entsteht eine Liste).</p>';
+  $('elBody').querySelectorAll('.elKopf').forEach(k => k.onclick = e => {
+    if(e.target.closest('button')) return;
+    elOffen = (elOffen === k.dataset.el) ? '' : k.dataset.el;
+    renderElemente();
+  });
+  $('elBody').querySelectorAll('button[data-eldel]').forEach(b => b.onclick = () => {
+    if(!confirm('Liste „' + b.dataset.eldel + '" löschen?')) return;
+    const alle = elLese(), l = alle.find(x => x.blatt === b.dataset.eldel);
+    if(l){ l.geloescht = true; l.updatedAt = Date.now(); elSchreibe(alle); }
+    renderElemente();
+  });
+}
+$('btnElemente').onclick = () => { $('menuPanel').hidden = true; renderElemente(); $('elDlg').showModal(); };
+$('elLaden').onclick = () => $('elFile').click();
+$('elFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if(f) importElemente(f); };
+$('elX').onclick = $('elOk').onclick = () => $('elDlg').close();
+
 /* ================= Benutzer, Rollen & Projektdaten (SYNIUM-Benutzersystem) =================
    Master-Admin ist in allen SYNIUM-Apps derselbe (Masterschlüssel). Neue User registrieren
    sich mit Namen + 6-stelligem PIN. Projektdaten (Projektname, Betriebsstelle) dürfen nur
@@ -2341,12 +2530,14 @@ async function cloudSync(leise){
     dbSchreibeOhneSync(mess);
     const tabs = mischeListe(f.tabellen, tblLese(), 'id');
     tblSchreibeOhneSync(tabs);
+    const elems = mischeListe(f.elemente, elLese(), 'blatt');
+    elSchreibeOhneSync(elems);
     bSpeicherOhneSync();
-    const lokalStand = JSON.stringify({ users:B.users, projekte:B.projekte, messungen:mess, tabellen:tabs });
-    const fernStand = fern.daten ? JSON.stringify({ users:f.users || [], projekte:f.projekte || [], messungen:f.messungen || [], tabellen:f.tabellen || [] }) : '';
+    const lokalStand = JSON.stringify({ users:B.users, projekte:B.projekte, messungen:mess, tabellen:tabs, elemente:elems });
+    const fernStand = fern.daten ? JSON.stringify({ users:f.users || [], projekte:f.projekte || [], messungen:f.messungen || [], tabellen:f.tabellen || [], elemente:f.elemente || [] }) : '';
     if(lokalStand !== fernStand)
       await cloudSchreibe({ app:'SYNIUM-LST-DB', version:1, stand:new Date().toISOString(),
-        users:B.users, projekte:B.projekte, messungen:mess, tabellen:tabs }, fern.sha);
+        users:B.users, projekte:B.projekte, messungen:mess, tabellen:tabs, elemente:elems }, fern.sha);
     applyUserUi();
     cloudStatusSetzen('✅ Verbunden — letzter Abgleich ' + new Date().toLocaleTimeString('de-DE') + ' Uhr');
     return true;
