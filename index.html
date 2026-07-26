@@ -1086,12 +1086,15 @@ svg.leaflet-image-layer.leaflet-interactive path {
 <dialog id="pnDlg">
   <div class="dhead">📌 Punkt benennen<button class="dx" id="pnX">✕</button></div>
   <div class="dbody">
-    <label class="dfeld">Bezeichnung (freie Eingabe)
-      <input type="text" id="pnName" autocomplete="off"></label>
+    <label class="dfeld">Bezeichnung (freie Eingabe — beim Tippen erscheinen passende Elemente)
+      <input type="text" id="pnName" list="pnVorschlaege" autocomplete="off"></label>
+    <datalist id="pnVorschlaege"></datalist>
     <label class="dfeld">… oder aus einer Elementliste übernehmen
       <select id="pnBlatt"></select></label>
     <label class="dfeld" id="pnElWrap" style="display:none">Element
       <select id="pnEl"></select></label>
+    <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted); cursor:pointer; margin-top:2px">
+      <input type="checkbox" id="pnVerw"> Bereits verwendete Elemente einblenden</label>
   </div>
   <div class="dfoot">
     <button id="pnAbbr">Abbrechen</button>
@@ -1604,6 +1607,28 @@ function messUpdate(){
    Blatt-Auswahl (Gleis …, AzZw …, Wsb …) ein Element aus den geladenen
    Elementlisten als Bezeichnung übernommen werden. */
 let pnCb = null;
+/* Element bereits als Punkt auf der Karte vergeben? → standardmäßig ausblenden */
+function elVerwendet(name){
+  const n = String(name).trim().toLowerCase();
+  return marks.some(m => String(m.name).trim().toLowerCase() === n);
+}
+/* Vorschläge (Suchfeld) und Element-Auswahl füllen — gefiltert nach Verwendung */
+function pnFuelle(){
+  const zeigeVerw = $('pnVerw').checked;
+  const listen = elLese().filter(l => !l.geloescht);
+  const frei = l => l.eintraege.filter(e => zeigeVerw || !elVerwendet(e));
+  // Suchfeld-Vorschläge: alle (freien) Elemente aller Listen, Blattname als Beschriftung
+  $('pnVorschlaege').innerHTML = listen.flatMap(l =>
+    frei(l).map(e => '<option value="' + esc(e) + '">' + esc(l.blatt) + '</option>')).join('');
+  const l = listen[+$('pnBlatt').value];
+  if(l && $('pnBlatt').value !== ''){
+    $('pnElWrap').style.display = '';
+    const eintraege = frei(l);
+    $('pnEl').innerHTML = eintraege.length
+      ? '<option value="">— Element wählen —</option>' + eintraege.map(e => '<option>' + esc(e) + '</option>').join('')
+      : '<option value="">(alle Elemente dieses Blatts sind bereits vergeben)</option>';
+  } else $('pnElWrap').style.display = 'none';
+}
 function frageMarkName(cb){
   const nr = marks.length + 1;
   $('pnName').value = 'P' + nr;
@@ -1613,19 +1638,14 @@ function frageMarkName(cb){
   $('pnBlatt').disabled = !listen.length;
   $('pnEl').innerHTML = '';
   $('pnElWrap').style.display = 'none';
+  $('pnVerw').checked = false;
+  pnFuelle();
   pnCb = cb;
   $('pnDlg').showModal();
   setTimeout(() => { $('pnName').focus(); $('pnName').select(); }, 60);
 }
-$('pnBlatt').onchange = () => {
-  const listen = elLese().filter(l => !l.geloescht);
-  const l = listen[+$('pnBlatt').value];
-  if(l){
-    $('pnElWrap').style.display = '';
-    $('pnEl').innerHTML = '<option value="">— Element wählen —</option>' +
-      l.eintraege.map(e => '<option>' + esc(e) + '</option>').join('');
-  } else $('pnElWrap').style.display = 'none';
-};
+$('pnBlatt').onchange = pnFuelle;
+$('pnVerw').onchange = pnFuelle;
 $('pnEl').onchange = () => { if($('pnEl').value) $('pnName').value = $('pnEl').value; };
 $('pnGo').onclick = () => {
   const cb = pnCb; pnCb = null;
@@ -2209,12 +2229,14 @@ function elSchreibe(d){ elSchreibeOhneSync(d); cloudPlan(); }
 async function importElemente(file){
   try{
     const blaetter = await xlsxAlleBlaetter(await file.arrayBuffer());
-    // JEDES Blatt mit einer „Element"-Spalte wird zu einer Liste (Gleis …, AzZw …, Wsb … usw.);
-    // Blätter ohne Element-Spalte (z. B. Deckblätter) werden automatisch übersprungen
+    // Relevant sind NUR Blätter „AzZw. Weichen" und Blätter „Gleis <Nr>" —
+    // alle anderen Blätter werden ignoriert
+    const relevantName = n => /az\s*\.?\s*zw/i.test(n) || /gleis\s*\.?\s*\d/i.test(n);
     const dicht = row => Array.from({ length: (row || []).length }, (_, j) => String((row && row[j] != null) ? row[j] : ''));
     const klammerWeg = s => String(s).replace(/\[\s*\d+\s*\]/g, '').trim();
     const listen = [];
     for(const b of blaetter){
+      if(!relevantName(b.name)) continue;
       let hi = -1, cEl = -1, cArt = -1;
       for(let i = 0; i < Math.min(b.grid.length, 80); i++){
         const d = dicht(b.grid[i]);
