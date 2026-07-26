@@ -1024,6 +1024,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <span class="chip">⏱ <b id="dauer">00:00</b></span>
     <span class="chip">🚶 <b id="tempo">0,0</b> km/h</span>
     <span class="chip" id="chipTab" title="Ziel-Tabelle für gespeicherte Abstände — antippen zum Wechseln" style="cursor:pointer">📋 <b id="chipTabName">keine Tabelle</b></span>
+    <span class="chip" id="chipMl" title="Messliste: Elementliste, in der gemessen wird — antippen zum Einstellen" style="cursor:pointer">📚 <b id="chipMlName">keine Messliste</b></span>
   </div>
 </div>
 
@@ -1097,6 +1098,31 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </dialog>
 <input type="file" id="dbFile" accept=".json" hidden>
 <input type="file" id="elFile" accept=".xlsx,.xlsm" hidden>
+
+<!-- Messliste: in welcher Elementliste wird gemessen, mit Reihenfolge und Nummern-Bereich -->
+<dialog id="mlDlg">
+  <div class="dhead">📚 Messliste<button class="dx" id="mlX">✕</button></div>
+  <div class="dbody">
+    <label class="dfeld">Elementliste, in der gemessen wird
+      <select id="mlBlatt"></select></label>
+    <label class="dfeld">Reihenfolge der Nummerierung
+      <select id="mlRicht">
+        <option value="vor">vom ersten Element der Liste (oben) = Nr. 1</option>
+        <option value="rueck">vom letzten Element der Liste = Nr. 1</option>
+      </select></label>
+    <label class="dfeld" id="mlStartWrap">Beginnen mit (wird Nr. 1)
+      <select id="mlStart"></select></label>
+    <label class="dfeld" id="mlEndeWrap">Beenden mit (letzte Nummer)
+      <select id="mlEnde"></select></label>
+    <p class="dnote" style="margin:0">Die laufenden Nummern sind in den Elementlisten und bei der
+      Element-Auswahl sichtbar; die gewählte Messliste wird oben als Chip angezeigt.</p>
+  </div>
+  <div class="dfoot">
+    <button id="mlLeer">Keine Messliste</button>
+    <span style="flex:1"></span>
+    <button id="mlOk" style="background:linear-gradient(135deg,#22c55e,#059669); border:none; color:#fff">✔ Übernehmen</button>
+  </div>
+</dialog>
 
 <!-- Punkt benennen: freie Eingabe ODER Element aus einer geladenen Liste wählen -->
 <dialog id="pnDlg">
@@ -1515,13 +1541,24 @@ function markArt(m){ return String(m.name).trim().split(/\s+/)[0] || '—'; }
 /* Ausgeblendete Elementarten — nur die DARSTELLUNG auf der Karte; Daten, Abstände
    und Messungen bleiben vollständig erhalten */
 const ARTF_KEY = 'synium_gps_artfilter_v1';
-let artVersteckt = new Set();
+const LISTF_KEY = 'synium_gps_listenfilter_v1';
+let artVersteckt = new Set(), listeVersteckt = new Set();
 try{ const a = JSON.parse(localStorage.getItem(ARTF_KEY) || '[]'); if(Array.isArray(a)) artVersteckt = new Set(a); }catch(e){}
-function artSpeichern(){ try{ localStorage.setItem(ARTF_KEY, JSON.stringify([...artVersteckt])); }catch(e){} }
+try{ const a = JSON.parse(localStorage.getItem(LISTF_KEY) || '[]'); if(Array.isArray(a)) listeVersteckt = new Set(a); }catch(e){}
+function artSpeichern(){
+  try{
+    localStorage.setItem(ARTF_KEY, JSON.stringify([...artVersteckt]));
+    localStorage.setItem(LISTF_KEY, JSON.stringify([...listeVersteckt]));
+  }catch(e){}
+}
+/* Punkt ausgeblendet? — wenn seine ELEMENTART oder seine ganze LISTE ausgeblendet ist */
+function markVersteckt(m){
+  return artVersteckt.has(markArt(m)) || (m.liste && listeVersteckt.has(m.liste));
+}
 function zeichneMark(i){
   const m = marks[i];
   const cm = L.circleMarker([m.lat, m.lng], { radius:7, color:'#fff', weight:2, fillColor:'#f59e0b', fillOpacity:1 });
-  if(!artVersteckt.has(markArt(m))) cm.addTo(map);   // ausgeblendete Art: Punkt nicht auf die Karte
+  if(!markVersteckt(m)) cm.addTo(map);   // ausgeblendet: Punkt nicht auf die Karte
   cm.bindTooltip(esc(m.name), { permanent:true, direction:'top', offset:[0, -8], className:'markTip' });
   cm.on('click', e => { L.DomEvent.stop(e); wahlToggle(i); });
   cm.on('contextmenu', e => {
@@ -1540,7 +1577,10 @@ function alleMarksNeu(){
    Damit werden Abstände zwischen Punkten als ZURÜCKGELEGTER WEG gemessen (blaue Spur),
    nicht als Luftlinie — wie bei einem Navigationssystem. */
 function markAnlegen(lat, lng, name, weg){
+  // Herkunfts-Liste merken (für das Ein-/Ausblenden ganzer Listen auf der Karte)
+  const quelle = elLese().find(l => !l.geloescht && l.eintraege.includes(name));
   marks.push({ lat, lng, name,
+    liste: quelle ? quelle.blatt : null,
     wegD: (weg && isFinite(weg.wegD)) ? weg.wegD : null,
     tid: (weg && weg.tid) ? String(weg.tid) : null });
   zeichneMark(marks.length - 1);
@@ -1618,7 +1658,9 @@ function messUpdate(){
       messTips.push(tt);
     }
     messLinie = L.polyline(segmente, { color:'#22c55e', weight:3, opacity:.85, dashArray:'6 9' }).addTo(map);
-    box.innerHTML = zeilen.join('<br>') +
+    box.innerHTML =
+      (ML.blatt ? '<small style="color:var(--faint)">Messung innerhalb „' + esc(ML.blatt) + '"</small><br>' : '') +
+      zeilen.join('<br>') +
       (pts.length > 2 ? '<br>Gesamt: <b>' + Math.round(ges) + ' m</b>' : '') +
       (alleWeg ? '' : '<br><small style="color:var(--faint)">Luftlinie = Punkt liegt nicht an der aufgezeichneten Spur</small>') +
       ' <button id="messTab">➕ In Tabelle</button>' + leerKnopf;
@@ -1649,8 +1691,10 @@ function pnFuelle(){
   if(l && $('pnBlatt').value !== ''){
     $('pnElWrap').style.display = '';
     const eintraege = frei(l);
+    const nrn = (l.blatt === ML.blatt) ? mlNummern() : null;
     $('pnEl').innerHTML = eintraege.length
-      ? '<option value="">— Element wählen —</option>' + eintraege.map(e => '<option>' + esc(e) + '</option>').join('')
+      ? '<option value="">— Element wählen —</option>' + eintraege.map(e =>
+          '<option value="' + esc(e) + '">' + (nrn && nrn.has(e) ? nrn.get(e) + '. ' : '') + esc(e) + '</option>').join('')
       : '<option value="">(alle Elemente dieses Blatts sind bereits vergeben)</option>';
   } else $('pnElWrap').style.display = 'none';
 }
@@ -1696,24 +1740,34 @@ map.on('contextmenu', e => {   // langes Drücken (bzw. Rechtsklick) auf die Kar
 
 /* ===== Elemente nach Elementart ein-/ausblenden ===== */
 function renderArtDlg(){
-  const zaehl = new Map();
-  marks.forEach(m => { const a = markArt(m); zaehl.set(a, (zaehl.get(a) || 0) + 1); });
-  $('artBody').innerHTML = zaehl.size
-    ? [...zaehl.entries()].sort((a, b) => a[0].localeCompare(b[0], 'de')).map(([a, n]) =>
-        '<label class="pRow" style="cursor:pointer"><input type="checkbox" data-art="' + esc(a) + '"' +
-        (artVersteckt.has(a) ? '' : ' checked') + '> <b>' + esc(a) + '</b> <small>(' + n + ' Element' + (n === 1 ? '' : 'e') + ')</small>' +
-        '<span style="flex:1"></span>' + (artVersteckt.has(a) ? '<small>ausgeblendet</small>' : '') + '</label>').join('')
+  const arten = new Map(), listen = new Map();
+  marks.forEach(m => {
+    const a = markArt(m); arten.set(a, (arten.get(a) || 0) + 1);
+    if(m.liste) listen.set(m.liste, (listen.get(m.liste) || 0) + 1);
+  });
+  const zeile = (typ, name, n, versteckt) =>
+    '<label class="pRow" style="cursor:pointer"><input type="checkbox" data-' + typ + '="' + esc(name) + '"' +
+    (versteckt ? '' : ' checked') + '> <b>' + esc(name) + '</b> <small>(' + n + ' Element' + (n === 1 ? '' : 'e') + ')</small>' +
+    '<span style="flex:1"></span>' + (versteckt ? '<small>ausgeblendet</small>' : '') + '</label>';
+  $('artBody').innerHTML = (arten.size || listen.size)
+    ? (listen.size ? '<p class="dnote" style="margin:0 0 6px"><b>Ganze Listen</b></p>' +
+        [...listen.entries()].sort((a, b) => a[0].localeCompare(b[0], 'de')).map(([l, n]) => zeile('liste', l, n, listeVersteckt.has(l))).join('') : '') +
+      (arten.size ? '<p class="dnote" style="margin:10px 0 6px"><b>Elementarten</b></p>' +
+        [...arten.entries()].sort((a, b) => a[0].localeCompare(b[0], 'de')).map(([a, n]) => zeile('art', a, n, artVersteckt.has(a))).join('') : '')
     : '<p class="dnote" style="margin:0">Noch keine Punkte auf der Karte.</p>';
+  const anwenden = () => { artSpeichern(); alleMarksNeu(); messUpdate(); renderArtDlg(); };
   $('artBody').querySelectorAll('input[data-art]').forEach(cb => cb.onchange = () => {
     if(cb.checked) artVersteckt.delete(cb.dataset.art); else artVersteckt.add(cb.dataset.art);
-    artSpeichern();
-    alleMarksNeu(); messUpdate();   // Karte neu zeichnen — Auswahl und Messungen bleiben
-    renderArtDlg();
+    anwenden();
+  });
+  $('artBody').querySelectorAll('input[data-liste]').forEach(cb => cb.onchange = () => {
+    if(cb.checked) listeVersteckt.delete(cb.dataset.liste); else listeVersteckt.add(cb.dataset.liste);
+    anwenden();
   });
 }
 $('btnArt').onclick = () => { renderArtDlg(); $('artDlg').showModal(); };
 $('artAlle').onclick = () => {
-  artVersteckt.clear(); artSpeichern();
+  artVersteckt.clear(); listeVersteckt.clear(); artSpeichern();
   alleMarksNeu(); messUpdate(); renderArtDlg();
 };
 $('artX').onclick = $('artOk').onclick = () => $('artDlg').close();
@@ -1722,6 +1776,7 @@ try{
   const roh = JSON.parse(localStorage.getItem(MARK_KEY) || '[]');
   if(Array.isArray(roh)) for(const m of roh)
     if(m && isFinite(+m.lat) && isFinite(+m.lng)) marks.push({ lat:+m.lat, lng:+m.lng, name:String(m.name || 'P'),
+      liste: m.liste ? String(m.liste) : null,
       wegD: isFinite(+m.wegD) ? +m.wegD : null, tid: m.tid ? String(m.tid) : null });
   marks.forEach((_, j) => zeichneMark(j));
 }catch(e){}
@@ -2338,7 +2393,11 @@ function renderElemente(){
         '<span style="flex:1"></span><button data-eldel="' + esc(l.blatt) + '" title="Liste löschen">🗑</button>' +
         '<span class="pfeilEl">' + (elOffen === l.blatt ? '▾' : '▸') + '</span></div>' +
         (elOffen === l.blatt
-          ? '<div class="elListe">' + l.eintraege.map(e => '<div class="elEintrag">' + esc(e) + '</div>').join('') + '</div>'
+          ? '<div class="elListe">' + (() => {
+              const nrn = (l.blatt === ML.blatt) ? mlNummern() : null;
+              return l.eintraege.map(e => '<div class="elEintrag">' +
+                (nrn && nrn.has(e) ? '<b style="color:var(--accent)">' + nrn.get(e) + '.</b> ' : '') + esc(e) + '</div>').join('');
+            })() + '</div>'
           : '') + '</div>').join('')
     : '<p class="dnote" style="margin:0">Noch keine Elementlisten — über „📄 Excel laden …" die Elementliste einlesen ' +
       '(aus jedem Blatt mit einer „Element"-Spalte — Gleis …, AzZw …, Wsb … — entsteht eine Liste).</p>';
@@ -2354,6 +2413,69 @@ function renderElemente(){
     renderElemente();
   });
 }
+/* ===== Messliste: in dieser Elementliste wird gemessen — mit wählbarer Richtung
+   und frei wählbarem Nummern-Bereich (Start-Element = Nr. 1, End-Element = letzte Nr.) ===== */
+const ML_KEY = 'synium_gps_messliste_v1';
+let ML = { blatt:'', richtung:'vor', start:'', ende:'' };
+try{ const m = JSON.parse(localStorage.getItem(ML_KEY) || 'null'); if(m && typeof m === 'object') ML = { ...ML, ...m }; }catch(e){}
+function mlSpeichern(){ try{ localStorage.setItem(ML_KEY, JSON.stringify(ML)); }catch(e){} }
+function mlListe(){ return elLese().find(l => !l.geloescht && l.blatt === ML.blatt) || null; }
+/* laufende Nummern der Messliste: Element → Nr. (nur innerhalb des gewählten Bereichs) */
+function mlNummern(){
+  const l = mlListe();
+  if(!l) return null;
+  const seq = l.eintraege.slice();
+  if(ML.richtung === 'rueck') seq.reverse();
+  let a = ML.start ? seq.indexOf(ML.start) : 0; if(a < 0) a = 0;
+  let b = ML.ende ? seq.indexOf(ML.ende) : seq.length - 1; if(b < 0) b = seq.length - 1;
+  if(b < a){ const t = a; a = b; b = t; }
+  const map = new Map();
+  for(let i = a; i <= b; i++) map.set(seq[i], i - a + 1);
+  return map;
+}
+function updateMlChip(){
+  if(ML.blatt && !mlListe()) ML.blatt = '';
+  $('chipMlName').textContent = ML.blatt ? (ML.blatt + (ML.richtung === 'rueck' ? ' ↑' : ' ↓')) : 'keine Messliste';
+}
+function mlFuelleDialog(){
+  const listen = elLese().filter(l => !l.geloescht);
+  $('mlBlatt').innerHTML = '<option value="">— keine Messliste —</option>' +
+    listen.map(l => '<option' + (l.blatt === ML.blatt ? ' selected' : '') + '>' + esc(l.blatt) + '</option>').join('');
+  $('mlRicht').value = ML.richtung;
+  const l = listen.find(x => x.blatt === $('mlBlatt').value);
+  const zeig = !!l;
+  $('mlStartWrap').style.display = zeig ? '' : 'none';
+  $('mlEndeWrap').style.display = zeig ? '' : 'none';
+  if(l){
+    const seq = l.eintraege.slice();
+    if($('mlRicht').value === 'rueck') seq.reverse();
+    $('mlStart').innerHTML = '<option value="">— erstes Element —</option>' +
+      seq.map(e => '<option' + (e === ML.start ? ' selected' : '') + '>' + esc(e) + '</option>').join('');
+    $('mlEnde').innerHTML = '<option value="">— letztes Element —</option>' +
+      seq.map(e => '<option' + (e === ML.ende ? ' selected' : '') + '>' + esc(e) + '</option>').join('');
+  }
+}
+$('chipMl').onclick = () => { mlFuelleDialog(); $('mlDlg').showModal(); };
+$('mlBlatt').onchange = () => { ML.start = ''; ML.ende = ''; ML.blatt = $('mlBlatt').value; mlFuelleDialog(); };
+$('mlRicht').onchange = () => { ML.richtung = $('mlRicht').value; mlFuelleDialog(); };
+$('mlOk').onclick = () => {
+  ML.blatt = $('mlBlatt').value;
+  ML.richtung = $('mlRicht').value;
+  ML.start = $('mlStart') && ML.blatt ? $('mlStart').value : '';
+  ML.ende = $('mlEnde') && ML.blatt ? $('mlEnde').value : '';
+  mlSpeichern(); updateMlChip();
+  if($('elDlg').open) renderElemente();
+  messUpdate();
+  $('mlDlg').close();
+};
+$('mlLeer').onclick = () => {
+  ML = { blatt:'', richtung:'vor', start:'', ende:'' };
+  mlSpeichern(); updateMlChip(); messUpdate();
+  if($('elDlg').open) renderElemente();
+  $('mlDlg').close();
+};
+$('mlX').onclick = () => $('mlDlg').close();
+
 $('btnElemente').onclick = () => { $('menuPanel').hidden = true; renderElemente(); $('elDlg').showModal(); };
 $('elLaden').onclick = () => $('elFile').click();
 $('elFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if(f) importElemente(f); };
@@ -2705,6 +2827,7 @@ if(cloudToken){
 
 applyUserUi();
 updateTabChip();   // Ziel-Tabelle im Chip anzeigen
+updateMlChip();    // Messliste im Chip anzeigen
 setTimeout(() => { if(!loggedIn()) openLogin(); }, 4900);   // Anmeldung nach dem Intro
 
 anzeigen();
