@@ -2240,10 +2240,14 @@ async function importElemente(file){
       let hi = -1, cEl = -1, cArt = -1;
       for(let i = 0; i < Math.min(b.grid.length, 80); i++){
         const d = dicht(b.grid[i]);
-        const ie = d.findIndex(x => /^element/i.test(x.trim()));
+        // Kopf darf „Element" auch ENTHALTEN — z. B. „[ID] Elemente" in den Gleis-Blättern
+        const ie = d.findIndex(x => /element/i.test(x.trim()));
         if(ie >= 0){
           hi = i; cEl = ie;
           cArt = d.findIndex(x => /^(abk|elementart|art\b|typ\b)/i.test(x.trim()));
+          // Rückfall: die Abkürzungs-Spalte steht direkt LINKS der Element-Spalte
+          // (auch wenn ihr Kopf anders heißt, z. B. „OL")
+          if(cArt < 0 && cEl > 0) cArt = cEl - 1;
           break;
         }
       }
