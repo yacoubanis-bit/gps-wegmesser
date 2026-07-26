@@ -2166,19 +2166,19 @@ function elSchreibe(d){ elSchreibeOhneSync(d); cloudPlan(); }
 async function importElemente(file){
   try{
     const blaetter = await xlsxAlleBlaetter(await file.arrayBuffer());
-    // nur Gleis-Blätter und AzZw-Blatt (Achszähler zwischen den Weichen)
-    const relevant = blaetter.filter(b => /^gleis\b|^gleis\s*\d/i.test(b.name) || /az\s*\.?\s*zw/i.test(b.name));
+    // JEDES Blatt mit einer „Element"-Spalte wird zu einer Liste (Gleis …, AzZw …, Wsb … usw.);
+    // Blätter ohne Element-Spalte (z. B. Deckblätter) werden automatisch übersprungen
     const dicht = row => Array.from({ length: (row || []).length }, (_, j) => String((row && row[j] != null) ? row[j] : ''));
     const klammerWeg = s => String(s).replace(/\[\s*\d+\s*\]/g, '').trim();
     const listen = [];
-    for(const b of relevant){
+    for(const b of blaetter){
       let hi = -1, cEl = -1, cArt = -1;
-      for(let i = 0; i < Math.min(b.grid.length, 40); i++){
+      for(let i = 0; i < Math.min(b.grid.length, 80); i++){
         const d = dicht(b.grid[i]);
-        const ie = d.findIndex(x => /^elemente?$/i.test(x.trim()));
+        const ie = d.findIndex(x => /^element/i.test(x.trim()));
         if(ie >= 0){
           hi = i; cEl = ie;
-          cArt = d.findIndex(x => /^abk/i.test(x.trim()));
+          cArt = d.findIndex(x => /^(abk|elementart|art\b|typ\b)/i.test(x.trim()));
           break;
         }
       }
@@ -2194,7 +2194,7 @@ async function importElemente(file){
       if(eintraege.length)
         listen.push({ blatt: b.name, eintraege, owner: sessU(), updatedAt: Date.now(), geloescht: false });
     }
-    if(!listen.length) throw new Error('Keine passenden Blätter (Gleis … / AzZw …) mit einer „Element"-Spalte gefunden.');
+    if(!listen.length) throw new Error('Kein Blatt mit einer „Element"-Spalte gefunden.');
     // je Blattname ersetzen bzw. ergänzen
     const alle = elLese();
     for(const l of listen){
@@ -2222,7 +2222,7 @@ function renderElemente(){
           ? '<div class="elListe">' + l.eintraege.map(e => '<div class="elEintrag">' + esc(e) + '</div>').join('') + '</div>'
           : '') + '</div>').join('')
     : '<p class="dnote" style="margin:0">Noch keine Elementlisten — über „📄 Excel laden …" die Elementliste einlesen ' +
-      '(je Blatt „Gleis …" bzw. „AzZw …" entsteht eine Liste).</p>';
+      '(aus jedem Blatt mit einer „Element"-Spalte — Gleis …, AzZw …, Wsb … — entsteht eine Liste).</p>';
   $('elBody').querySelectorAll('.elKopf').forEach(k => k.onclick = e => {
     if(e.target.closest('button')) return;
     elOffen = (elOffen === k.dataset.el) ? '' : k.dataset.el;
