@@ -707,6 +707,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
   }
   /* Meterzahl LINKSBÜNDIG, Menü-Taste rechts in derselben Zeile */
   #distWrap{display:flex; align-items:center; text-align:left; line-height:1}
+  /* Nächstes Element der Messliste — groß neben der Meterzahl */
+  #nextEl{margin-left:16px; min-width:0; overflow:hidden; line-height:1.2}
+  #nextEl small{display:block; font-size:9.5px; color:var(--muted); letter-spacing:.7px; text-transform:uppercase; margin-bottom:2px}
+  #nextEl b{display:block; font-size:17px; color:#fbbf24; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:44vw}
   #dist{
     font-size:56px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:1px;
     background:linear-gradient(180deg, #eef1ff, #aebaff); -webkit-background-clip:text; background-clip:text;
@@ -1019,7 +1023,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </div>
 
 <div id="panel">
-  <div id="distWrap"><span id="dist">0</span><span id="distEinheit">m</span><button id="btnMenu" title="Menü">☰</button></div>
+  <div id="distWrap"><span id="dist">0</span><span id="distEinheit">m</span>
+    <div id="nextEl" hidden><small>Nächstes Element</small><b id="nextElName"></b></div>
+    <button id="btnMenu" title="Menü">☰</button></div>
   <div id="chips">
     <span class="chip">⏱ <b id="dauer">00:00</b></span>
     <span class="chip">🚶 <b id="tempo">0,0</b> km/h</span>
@@ -1572,6 +1578,7 @@ function alleMarksNeu(){
   markObjs = [];
   marks.forEach((_, j) => zeichneMark(j));
   marks.forEach((_, j) => markStil(j));
+  updateNextEl();
 }
 /* Punkt anlegen — weg = {wegD, tid}: Kilometerstand der Spur an diesem Punkt.
    Damit werden Abstände zwischen Punkten als ZURÜCKGELEGTER WEG gemessen (blaue Spur),
@@ -1585,6 +1592,7 @@ function markAnlegen(lat, lng, name, weg){
     tid: (weg && weg.tid) ? String(weg.tid) : null });
   zeichneMark(marks.length - 1);
   markSpeichern();
+  updateNextEl();   // Anzeige „Nächstes Element" fortschalten
 }
 /* Nächster Spur-Punkt zu einer Kartenposition (für per Karte gesetzte Punkte) */
 function spurAnschluss(lat, lng){
@@ -1684,9 +1692,13 @@ function pnFuelle(){
   const zeigeVerw = $('pnVerw').checked;
   const listen = elLese().filter(l => !l.geloescht);
   const frei = l => l.eintraege.filter(e => zeigeVerw || !elVerwendet(e));
-  // Suchfeld-Vorschläge: alle (freien) Elemente aller Listen, Blattname als Beschriftung
-  $('pnVorschlaege').innerHTML = listen.flatMap(l =>
-    frei(l).map(e => '<option value="' + esc(e) + '">' + esc(l.blatt) + '</option>')).join('');
+  // Suchfeld-Vorschläge: das NÄCHSTE Element der Messliste zuerst, danach alle übrigen
+  const nx = nextElement();
+  $('pnVorschlaege').innerHTML =
+    (nx ? '<option value="' + esc(nx.name) + '">Nächstes Element (' + nx.nr + '.)</option>' : '') +
+    listen.flatMap(l =>
+      frei(l).filter(e => !nx || e !== nx.name)
+        .map(e => '<option value="' + esc(e) + '">' + esc(l.blatt) + '</option>')).join('');
   const l = listen[+$('pnBlatt').value];
   if(l && $('pnBlatt').value !== ''){
     $('pnElWrap').style.display = '';
@@ -1700,7 +1712,9 @@ function pnFuelle(){
 }
 function frageMarkName(cb){
   const nr = marks.length + 1;
-  $('pnName').value = 'P' + nr;
+  // Vorbelegung: das nächste Element der Messliste — sonst freier Name „P<n>"
+  const nx = nextElement();
+  $('pnName').value = nx ? nx.name : ('P' + nr);
   const listen = elLese().filter(l => !l.geloescht);
   $('pnBlatt').innerHTML = '<option value="">— Elementliste wählen —</option>' +
     listen.map((l, i) => '<option value="' + i + '">' + esc(l.blatt) + ' (' + l.eintraege.length + ')</option>').join('');
@@ -2433,9 +2447,25 @@ function mlNummern(){
   for(let i = a; i <= b; i++) map.set(seq[i], i - a + 1);
   return map;
 }
+/* Nächstes (noch nicht als Punkt vergebenes) Element der Messliste in Nummern-Reihenfolge */
+function nextElement(){
+  if(!ML.blatt) return null;
+  const nrn = mlNummern();
+  if(!nrn) return null;
+  const sortiert = [...nrn.entries()].sort((a, b) => a[1] - b[1]);
+  for(const [name, nr] of sortiert) if(!elVerwendet(name)) return { name, nr };
+  return null;
+}
+/* Groß neben der Meterzahl anzeigen, was als Nächstes kommt */
+function updateNextEl(){
+  const nx = nextElement();
+  $('nextEl').hidden = !nx;
+  if(nx) $('nextElName').textContent = nx.nr + '. ' + nx.name;
+}
 function updateMlChip(){
   if(ML.blatt && !mlListe()) ML.blatt = '';
   $('chipMlName').textContent = ML.blatt ? (ML.blatt + (ML.richtung === 'rueck' ? ' ↑' : ' ↓')) : 'keine Messliste';
+  updateNextEl();
 }
 function mlFuelleDialog(){
   const listen = elLese().filter(l => !l.geloescht);
@@ -2463,7 +2493,7 @@ $('mlOk').onclick = () => {
   ML.richtung = $('mlRicht').value;
   ML.start = $('mlStart') && ML.blatt ? $('mlStart').value : '';
   ML.ende = $('mlEnde') && ML.blatt ? $('mlEnde').value : '';
-  mlSpeichern(); updateMlChip();
+  mlSpeichern(); updateMlChip(); updateNextEl();
   if($('elDlg').open) renderElemente();
   messUpdate();
   $('mlDlg').close();
