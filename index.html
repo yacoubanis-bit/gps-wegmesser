@@ -827,6 +827,19 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .pRow{display:flex; align-items:center; gap:8px; padding:8px 11px; border:1px solid var(--border); border-radius:11px; margin-bottom:7px; font-size:13.5px; line-height:1.35}
   .pRow small{color:var(--muted)}
   .pRow button{flex:none; min-height:34px; padding:0 11px; font-size:13px; background:var(--surface); border:1px solid var(--border); color:var(--fg); border-radius:8px}
+  /* gewählte Tabellenzeilen (Summen-Auswahl) */
+  #tabT tbody tr{cursor:pointer}
+  #tabT tbody tr.selz td{background:rgba(236,72,153,.18)}
+  #tabT tbody tr.ges{cursor:default}
+  /* kurze Bestätigung (Toast) */
+  #toastGps{
+    position:fixed; left:50%; transform:translateX(-50%); bottom:calc(70px + env(safe-area-inset-bottom));
+    z-index:4000; background:rgba(19,28,54,.96); border:1px solid var(--border); color:var(--fg);
+    font-size:12.5px; font-weight:600; padding:8px 16px; border-radius:999px;
+    opacity:0; pointer-events:none; transition:opacity .3s; white-space:nowrap; max-width:92vw;
+    overflow:hidden; text-overflow:ellipsis;
+  }
+  #toastGps.an{opacity:1}
 
   /* ===== PDF-Druck der Abstands-Tabelle (einheitliche SYNIUM-PDF-Einstellungen) ===== */
   #printTbl{display:none}
@@ -999,7 +1012,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <div id="chips">
     <span class="chip">⏱ <b id="dauer">00:00</b></span>
     <span class="chip">🚶 <b id="tempo">0,0</b> km/h</span>
-    <span class="chip">📍 <b id="punkte">0</b> Punkte</span>
+    <span class="chip" id="chipTab" title="Ziel-Tabelle für gespeicherte Abstände — antippen zum Wechseln" style="cursor:pointer">📋 <b id="chipTabName">keine Tabelle</b></span>
   </div>
 </div>
 
@@ -1033,6 +1046,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     </label>
     <p class="dnote" id="tabQuelle"></p>
     <div style="overflow-x:auto"><table id="tabT"><thead></thead><tbody></tbody></table></div>
+    <div class="dnote" id="tabSumme" style="margin:10px 0 0"></div>
   </div>
   <div class="dfoot">
     <button id="btnTabSave">💾 Speichern</button>
@@ -1163,6 +1177,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </dialog>
 
 <div id="printTbl"></div>
+<div id="toastGps"></div>
 
 <script>
 /* @preserve
@@ -1202,8 +1217,8 @@ let tempoAktuell = 0;
 /* ================= Karte (OpenStreetMap) ================= */
 const map = L.map('map', { zoomControl:false, attributionControl:false }).setView([49.16, 11.68], 14);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
-/* Fahrweg: blasses (entsättigtes) Blau, 50 % transparent */
-const pfad = L.polyline([], { color:'#6699cc', weight:5, opacity:.5 }).addTo(map);
+/* Zurückgelegter Weg: PINK, 60 % Transparenz */
+const pfad = L.polyline([], { color:'#ec4899', weight:5, opacity:.6 }).addTo(map);
 /* Positions-PFEIL: zeigt die Bewegungsrichtung — die Karte dreht sich so mit,
    dass der Pfeil auf dem Bildschirm immer nach OBEN zeigt (course-up) */
 const posIcon = L.divIcon({ className:'posArrowWrap', iconSize:[34, 34], iconAnchor:[17, 17],
@@ -1358,7 +1373,6 @@ function anzeigen(){
   const teile = [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map(x => String(x).padStart(2, '0'));
   $('dauer').textContent = (s >= 3600 ? teile : teile.slice(1)).join(':');
   $('tempo').textContent = tempoAktuell.toLocaleString('de-DE', { minimumFractionDigits:1, maximumFractionDigits:1 });
-  $('punkte').textContent = punkte.length;
 }
 setInterval(() => { if(running) anzeigen(); }, 1000);
 
@@ -1479,6 +1493,17 @@ function abstand(a, b){
     return { m: Math.abs(b.wegD - a.wegD), weg: true };
   return { m: entf(a, b), weg: false };
 }
+/* Verbindungslinie zwischen zwei Punkten: verläuft entlang der AUFGEZEICHNETEN SPUR
+   (zurückgelegter Weg), nicht als gerade Luftlinie — Rückfall nur ohne Spur-Anschluss */
+function wegGeometrie(a, b){
+  if(a.tid && a.tid === b.tid && a.tid === trackId && isFinite(a.wegD) && isFinite(b.wegD) && punkte.length){
+    const lo = Math.min(a.wegD, b.wegD), hi = Math.max(a.wegD, b.wegD);
+    const seg = punkte.filter(p => isFinite(p.d) && p.d >= lo - 1 && p.d <= hi + 1).map(p => [p.lat, p.lng]);
+    if(seg.length >= 2)
+      return { pts: seg, mitte: seg[Math.floor(seg.length / 2)] };
+  }
+  return { pts: [[a.lat, a.lng], [b.lat, b.lng]], mitte: [(a.lat + b.lat) / 2, (a.lng + b.lng) / 2] };
+}
 function markLoeschen(i){
   marks.splice(i, 1);
   auswahl = [];
@@ -1509,19 +1534,21 @@ function messUpdate(){
     box.innerHTML = '📌 <b>' + esc(m0.name) + '</b> gewählt — weitere Punkte antippen, um Abstände zu messen.' + live + leerKnopf;
   } else {
     const pts = auswahl.map(i => marks[i]);
-    messLinie = L.polyline(pts.map(p => [p.lat, p.lng]),
-      { color:'#22c55e', weight:3, opacity:.85, dashArray:'6 9' }).addTo(map);
-    const zeilen = []; let ges = 0, alleWeg = true;
+    const zeilen = [], segmente = []; let ges = 0, alleWeg = true;
     for(let k = 1; k < pts.length; k++){
       const a = abstand(pts[k - 1], pts[k]); ges += a.m;
       if(!a.weg) alleWeg = false;
       zeilen.push(esc(pts[k - 1].name) + ' → ' + esc(pts[k].name) + ': <b>' + Math.round(a.m) + ' m</b>' +
         (a.weg ? '' : ' <small style="color:var(--faint)">(Luftlinie)</small>'));
+      // Linie verläuft entlang der Spur (zurückgelegter Weg), Etikett in der Mitte des Wegstücks
+      const g = wegGeometrie(pts[k - 1], pts[k]);
+      segmente.push(g.pts);
       const tt = L.tooltip({ permanent:true, direction:'center', className:'segTip' })
-        .setLatLng([(pts[k - 1].lat + pts[k].lat) / 2, (pts[k - 1].lng + pts[k].lng) / 2])
+        .setLatLng(g.mitte)
         .setContent(Math.round(a.m) + ' m').addTo(map);
       messTips.push(tt);
     }
+    messLinie = L.polyline(segmente, { color:'#22c55e', weight:3, opacity:.85, dashArray:'6 9' }).addTo(map);
     box.innerHTML = zeilen.join('<br>') +
       (pts.length > 2 ? '<br>Gesamt: <b>' + Math.round(ges) + ' m</b>' : '') +
       (alleWeg ? '' : '<br><small style="color:var(--faint)">Luftlinie = Punkt liegt nicht an der aufgezeichneten Spur</small>') +
@@ -1724,7 +1751,30 @@ function tblNeuAnlegen(){
   if(name === null) return null;
   const t = { id:'t' + Date.now(), name:(name.trim() || 'Tabelle'), eintraege:[], owner:sessU(), updatedAt:Date.now(), geloescht:false };
   const alle = tblLese(); alle.push(t); tblSchreibe(alle);
+  setAktiveTabelle(t.id);
   return t;
+}
+/* Ziel-Tabelle: dorthin werden gewählte Messungen gespeichert — sichtbar als Chip
+   neben Zeit und Geschwindigkeit; Antippen des Chips wechselt die Tabelle */
+const ATAB_KEY = 'synium_gps_zieltabelle_v1';
+let aktiveTabelle = localStorage.getItem(ATAB_KEY) || '';
+function updateTabChip(){
+  const t = tblLese().find(x => x.id === aktiveTabelle && !x.geloescht);
+  if(!t) aktiveTabelle = '';
+  $('chipTabName').textContent = t ? t.name : 'keine Tabelle';
+}
+function setAktiveTabelle(id){
+  aktiveTabelle = id || '';
+  if(aktiveTabelle) localStorage.setItem(ATAB_KEY, aktiveTabelle);
+  else localStorage.removeItem(ATAB_KEY);
+  updateTabChip();
+}
+$('chipTab').onclick = () => waehleTabelle(id => setAktiveTabelle(id));
+function toastZeig(msg){
+  const t = $('toastGps');
+  t.textContent = msg; t.classList.add('an');
+  clearTimeout(toastZeig.t);
+  toastZeig.t = setTimeout(() => t.classList.remove('an'), 2400);
 }
 /* Zeilen der aktuellen Punkt-Auswahl (aufeinanderfolgende Paare) */
 function auswahlZeilen(){
@@ -1757,22 +1807,35 @@ $('twNeu').onclick = () => {
   if(cb) cb(t.id);
 };
 $('twX').onclick = $('twOk').onclick = () => { twCb = null; $('twDlg').close(); };
-/* Aktuelle Punkt-Auswahl in eine Tabelle speichern */
+/* Aktuelle Punkt-Auswahl speichern — direkt in die Ziel-Tabelle (Chip),
+   ohne Ziel-Tabelle fragt die App einmalig nach */
 function auswahlInTabelle(){
   const zeilen = auswahlZeilen();
   if(!zeilen.length){ alert('Bitte mindestens zwei Punkte auf der Karte wählen.'); return; }
-  waehleTabelle(id => {
+  const speichere = id => {
     const alle = tblLese(), t = alle.find(x => x.id === id && !x.geloescht);
     if(!t) return;
     t.eintraege.push(...zeilen);
     t.updatedAt = Date.now();
     tblSchreibe(alle);
-    alert(zeilen.length + ' Abstand/Abstände in Tabelle „' + t.name + '" gespeichert.');
-  });
+    setAktiveTabelle(t.id);
+    toastZeig(zeilen.length + ' Abstand' + (zeilen.length === 1 ? '' : 'stände') + ' → Tabelle „' + t.name + '"');
+  };
+  if(aktiveTabelle && tblLese().some(x => x.id === aktiveTabelle && !x.geloescht)) speichere(aktiveTabelle);
+  else waehleTabelle(speichere);
 }
 
 /* ===== Anzeige: Live-Ansicht (aktuelle Punkte) oder gespeicherte Tabelle ===== */
 let tabAktiv = '';   // '' = Live-Ansicht, sonst Tabellen-Id
+let tabZeilSel = new Set();   // gewählte Zeilen (für die automatische Summen-Anzeige)
+function tabSummeUpdate(d){
+  const el = $('tabSumme');
+  if(!d.rows.length){ el.textContent = ''; return; }
+  if(!tabZeilSel.size){ el.textContent = 'Zeilen antippen — die Summe der gewählten Abstände erscheint hier automatisch.'; return; }
+  let s = 0, n = 0;
+  d.rows.forEach(r => { if(tabZeilSel.has(r.eid || ('n' + r.nr))){ s += r.m; n++; } });
+  el.innerHTML = '📐 <b>' + n + '</b> gewählte Abstände &nbsp;·&nbsp; Summe: <b>' + s + ' m</b>';
+}
 function tabAnsicht(){
   if(tabAktiv){
     const t = tblLese().find(x => x.id === tabAktiv && !x.geloescht);
@@ -1807,7 +1870,7 @@ function renderTab(){
     return (typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb), 'de')) * tabSort.dir;
   });
   $('tabT').querySelector('tbody').innerHTML =
-    rows.map(r => '<tr><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td class="num">' + r.m + '</td>' +
+    rows.map(r => '<tr data-zk="' + esc(r.eid || ('n' + r.nr)) + '"><td>' + r.nr + '</td><td>' + esc(r.von) + '</td><td>' + esc(r.nach) + '</td><td class="num">' + r.m + '</td>' +
       (d.tabelle && darfT ? '<td style="text-align:center"><button data-edel="' + esc(r.eid) + '" style="flex:none; min-height:26px; padding:0 8px; background:var(--surface); border:1px solid var(--border); border-radius:7px; font-size:12px; color:var(--muted)">🗑</button></td>' : '') +
       '</tr>').join('') +
     (d.rows.length ? '<tr class="ges"><td></td><td></td><td>Gesamt</td><td class="num">' + d.gesamt + '</td>' + (d.tabelle && darfT ? '<td></td>' : '') + '</tr>' : '');
@@ -1824,27 +1887,48 @@ function renderTab(){
     t.updatedAt = Date.now();
     tblSchreibe(alle); renderTab();
   });
+  // Zeilen antippen → automatische Summen-Anzeige der gewählten Abstände
+  $('tabT').querySelectorAll('tbody tr[data-zk]').forEach(tr => {
+    if(tabZeilSel.has(tr.dataset.zk)) tr.classList.add('selz');
+    tr.onclick = e => {
+      if(e.target.closest('button')) return;
+      const k = tr.dataset.zk;
+      if(tabZeilSel.has(k)) tabZeilSel.delete(k); else tabZeilSel.add(k);
+      tr.classList.toggle('selz');
+      tabSummeUpdate(d);
+    };
+  });
+  tabSummeUpdate(d);
 }
-$('tabWahl').onchange = () => { tabAktiv = $('tabWahl').value; tabSort = { key:'nr', dir:1 }; renderTab(); };
-$('tabNeu').onclick = () => { const t = tblNeuAnlegen(); if(t){ tabAktiv = t.id; renderTab(); } };
+$('tabWahl').onchange = () => {
+  tabAktiv = $('tabWahl').value;
+  tabSort = { key:'nr', dir:1 };
+  tabZeilSel.clear();
+  if(tabAktiv) setAktiveTabelle(tabAktiv);   // gewählte Tabelle wird auch Ziel-Tabelle (Chip)
+  renderTab();
+};
+$('tabNeu').onclick = () => { const t = tblNeuAnlegen(); if(t){ tabAktiv = t.id; tabZeilSel.clear(); renderTab(); } };
 $('tabRen').onclick = () => {
   const alle = tblLese(), t = alle.find(x => x.id === tabAktiv);
   if(!t || !darfTabelle(t)) return;
   const neu = prompt('Neuer Name der Tabelle:', t.name);
   if(neu === null || !neu.trim()) return;
   t.name = neu.trim(); t.updatedAt = Date.now();
-  tblSchreibe(alle); renderTab();
+  tblSchreibe(alle); updateTabChip(); renderTab();
 };
 $('tabDel').onclick = () => {
   const alle = tblLese(), t = alle.find(x => x.id === tabAktiv);
   if(!t || !darfTabelle(t)) return;
   if(!confirm('Tabelle „' + t.name + '" mit ' + t.eintraege.length + ' Abständen wirklich löschen?')) return;
   t.geloescht = true; t.updatedAt = Date.now();
-  tblSchreibe(alle); tabAktiv = ''; renderTab();
+  tblSchreibe(alle);
+  if(aktiveTabelle === t.id) setAktiveTabelle('');
+  tabAktiv = ''; tabZeilSel.clear(); renderTab();
 };
 $('btnTabelle').onclick = () => {
   $('menuPanel').hidden = true;
   tabSort = { key:'nr', dir:1 };
+  tabZeilSel.clear();
   if(auswahl.length >= 2) tabAktiv = '';   // aktive Punkt-Auswahl direkt anzeigen
   renderTab();
   $('tabDlg').showModal();
@@ -2312,6 +2396,7 @@ if(cloudToken){
 }
 
 applyUserUi();
+updateTabChip();   // Ziel-Tabelle im Chip anzeigen
 setTimeout(() => { if(!loggedIn()) openLogin(); }, 4900);   // Anmeldung nach dem Intro
 
 anzeigen();
