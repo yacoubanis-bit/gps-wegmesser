@@ -1080,7 +1080,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   </div>
 </dialog>
 <input type="file" id="dbFile" accept=".json" hidden>
-<input type="file" id="elFile" accept=".xlsx" hidden>
+<input type="file" id="elFile" accept=".xlsx,.xlsm" hidden>
 
 <!-- Elementlisten: je Excel-Blatt (Gleis 1, Gleis 2, …, AzZw Weichen) eine Liste -->
 <dialog id="elDlg">
@@ -2084,7 +2084,7 @@ async function unzip(buf){
   for(let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 22 - 65557); i--){
     if(dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; }
   }
-  if(eocd < 0) throw new Error('Das ist keine gültige .xlsx-Datei.');
+  if(eocd < 0) throw new Error('Das ist keine gültige Excel-Datei (.xlsx/.xlsm).');
   const count = dv.getUint16(eocd + 10, true);
   let off = dv.getUint32(eocd + 16, true);
   const entries = {};
