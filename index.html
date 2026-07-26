@@ -1082,6 +1082,24 @@ svg.leaflet-image-layer.leaflet-interactive path {
 <input type="file" id="dbFile" accept=".json" hidden>
 <input type="file" id="elFile" accept=".xlsx,.xlsm" hidden>
 
+<!-- Punkt benennen: freie Eingabe ODER Element aus einer geladenen Liste wählen -->
+<dialog id="pnDlg">
+  <div class="dhead">📌 Punkt benennen<button class="dx" id="pnX">✕</button></div>
+  <div class="dbody">
+    <label class="dfeld">Bezeichnung (freie Eingabe)
+      <input type="text" id="pnName" autocomplete="off"></label>
+    <label class="dfeld">… oder aus einer Elementliste übernehmen
+      <select id="pnBlatt"></select></label>
+    <label class="dfeld" id="pnElWrap" style="display:none">Element
+      <select id="pnEl"></select></label>
+  </div>
+  <div class="dfoot">
+    <button id="pnAbbr">Abbrechen</button>
+    <span style="flex:1"></span>
+    <button id="pnGo" style="background:linear-gradient(135deg,#22c55e,#059669); border:none; color:#fff">✔ Punkt setzen</button>
+  </div>
+</dialog>
+
 <!-- Elementlisten: je Excel-Blatt (Gleis 1, Gleis 2, …, AzZw Weichen) eine Liste -->
 <dialog id="elDlg">
   <div class="dhead">📚 Elementlisten<button class="dx" id="elX">✕</button></div>
@@ -1582,28 +1600,53 @@ function messUpdate(){
   const bt = $('messTab');
   if(bt) bt.onclick = () => auswahlInTabelle();
 }
-function neuerMarkName(){
+/* Punkt benennen: freie Eingabe bleibt IMMER möglich — zusätzlich kann über die
+   Blatt-Auswahl (Gleis …, AzZw …, Wsb …) ein Element aus den geladenen
+   Elementlisten als Bezeichnung übernommen werden. */
+let pnCb = null;
+function frageMarkName(cb){
   const nr = marks.length + 1;
-  const name = prompt('Bezeichnung für diesen Punkt:', 'P' + nr);
-  if(name === null) return null;
-  return name.trim() || ('P' + nr);
+  $('pnName').value = 'P' + nr;
+  const listen = elLese().filter(l => !l.geloescht);
+  $('pnBlatt').innerHTML = '<option value="">— Elementliste wählen —</option>' +
+    listen.map((l, i) => '<option value="' + i + '">' + esc(l.blatt) + ' (' + l.eintraege.length + ')</option>').join('');
+  $('pnBlatt').disabled = !listen.length;
+  $('pnEl').innerHTML = '';
+  $('pnElWrap').style.display = 'none';
+  pnCb = cb;
+  $('pnDlg').showModal();
+  setTimeout(() => { $('pnName').focus(); $('pnName').select(); }, 60);
 }
+$('pnBlatt').onchange = () => {
+  const listen = elLese().filter(l => !l.geloescht);
+  const l = listen[+$('pnBlatt').value];
+  if(l){
+    $('pnElWrap').style.display = '';
+    $('pnEl').innerHTML = '<option value="">— Element wählen —</option>' +
+      l.eintraege.map(e => '<option>' + esc(e) + '</option>').join('');
+  } else $('pnElWrap').style.display = 'none';
+};
+$('pnEl').onchange = () => { if($('pnEl').value) $('pnName').value = $('pnEl').value; };
+$('pnGo').onclick = () => {
+  const cb = pnCb; pnCb = null;
+  const name = $('pnName').value.trim();
+  $('pnDlg').close();
+  if(cb && name) cb(name);
+};
+$('pnX').onclick = $('pnAbbr').onclick = () => { pnCb = null; $('pnDlg').close(); };
 $('btnMark').onclick = () => {
   if(!map.hasLayer(posPunkt)){
     zeigHinweis('<h2>📌 Noch kein Standort</h2>Der aktuelle Standort ist noch nicht bekannt — bitte warten, bis der Positionspunkt auf der Karte erscheint.');
     return;
   }
-  const name = neuerMarkName();
-  if(name === null) return;
   const ll = posPunkt.getLatLng();
-  // aktueller Standort: Kilometerstand der Spur direkt übernehmen
-  markAnlegen(ll.lat, ll.lng, name, punkte.length ? { wegD: distanz, tid: trackId } : null);
+  const weg = punkte.length ? { wegD: distanz, tid: trackId } : null;   // Stand beim Antippen festhalten
+  frageMarkName(name => markAnlegen(ll.lat, ll.lng, name, weg));
 };
 map.on('contextmenu', e => {   // langes Drücken (bzw. Rechtsklick) auf die Karte
-  const name = neuerMarkName();
-  if(name === null) return;
-  // an die aufgezeichnete Spur anschließen (falls in der Nähe) → Weg-Abstand statt Luftlinie
-  markAnlegen(e.latlng.lat, e.latlng.lng, name, spurAnschluss(e.latlng.lat, e.latlng.lng));
+  const lat = e.latlng.lat, lng = e.latlng.lng;
+  const weg = spurAnschluss(lat, lng);   // an die aufgezeichnete Spur anschließen (falls in der Nähe)
+  frageMarkName(name => markAnlegen(lat, lng, name, weg));
 });
 /* gespeicherte Punkte wiederherstellen */
 try{
@@ -2464,11 +2507,9 @@ function renderPunkteDlg(){
 $('btnPunkte').onclick = () => { $('menuPanel').hidden = true; renderPunkteDlg(); $('pkDlg').showModal(); };
 $('pkNeu').onclick = () => {
   if(!map.hasLayer(posPunkt)){ alert('Der Standort ist noch nicht bekannt — bitte warten oder den Punkt per langem Druck auf die Karte setzen.'); return; }
-  const name = neuerMarkName();
-  if(name === null) return;
   const ll = posPunkt.getLatLng();
-  markAnlegen(ll.lat, ll.lng, name, punkte.length ? { wegD: distanz, tid: trackId } : null);
-  renderPunkteDlg();
+  const weg = punkte.length ? { wegD: distanz, tid: trackId } : null;
+  frageMarkName(name => { markAnlegen(ll.lat, ll.lng, name, weg); renderPunkteDlg(); });
 };
 $('pkX').onclick = $('pkOk').onclick = () => $('pkDlg').close();
 
